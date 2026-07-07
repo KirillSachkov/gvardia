@@ -36,6 +36,15 @@ type Commands struct {
 	Lazygit string `toml:"lazygit"`
 }
 
+// BaseBranch returns the configured base branch for a project, falling back to
+// the "default" entry (which may be "auto" for the collector to resolve).
+func (c Config) BaseBranch(project string) string {
+	if b, ok := c.Base[project]; ok {
+		return b
+	}
+	return c.Base["default"]
+}
+
 // Default returns the built-in configuration used when a key is unset.
 func Default() Config {
 	return Config{

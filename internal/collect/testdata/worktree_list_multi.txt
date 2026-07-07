@@ -1,0 +1,12 @@
+worktree /Users/dev/code/education-platform
+HEAD 6d307401b627aed97d582781fa26076d1a42d3b0
+branch refs/heads/codex/599-global-full-access
+
+worktree /Users/dev/code/education-platform-wt/fix-double-welcome
+HEAD 2c9124bf89f0d14c2f5bff01ea35f2ccc830f2e9
+branch refs/heads/fix/telegram-double-plan-welcome
+
+worktree /Users/dev/code/education-platform/.claude/worktrees/agent-a052d408a72ac38d3
+HEAD 878618acea608dba6a06423c2cd7e2cf0484da03
+branch refs/heads/feat/675-s2
+

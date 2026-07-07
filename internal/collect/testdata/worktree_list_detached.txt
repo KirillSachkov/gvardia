@@ -1,0 +1,8 @@
+worktree /Users/dev/code/gvardia
+HEAD 6d215bc0d64b1f568274dac615661b3f9ffa0e92
+branch refs/heads/v1
+
+worktree /Users/dev/code/gvardia-detached
+HEAD abcdef1234567890abcdef1234567890abcdef12
+detached
+

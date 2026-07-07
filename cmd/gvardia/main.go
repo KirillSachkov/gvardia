@@ -43,6 +43,8 @@ func run(args []string) error {
 	switch fs.Arg(0) {
 	case "agents":
 		return runAgents(fs.Args()[1:])
+	case "projects":
+		return runProjects(fs.Args()[1:], *configPath)
 	case "":
 		return runCockpit(*configPath)
 	default:

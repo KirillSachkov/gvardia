@@ -1,0 +1,6 @@
+# branch.oid 6d307401b627aed97d582781fa26076d1a42d3b0
+# branch.head codex/599-global-full-access
+# branch.upstream origin/codex/599-global-full-access
+1 .M N... 100644 100644 100644 019b952b7be4cedbed08d3c206fb613384285b6e 019b952b7be4cedbed08d3c206fb613384285b6e .serena/project.yml
+1 .M N... 100644 100644 100644 7f72a75e9554032aaa68cb3489981a8dc586fa5e 7f72a75e9554032aaa68cb3489981a8dc586fa5e backend/AccessService/src/AccessService.Domain/InviteLink.cs
+? untracked-note.txt
