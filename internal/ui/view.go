@@ -70,6 +70,11 @@ func (m Model) render() string {
 			lipgloss.Center, lipgloss.Center, "collecting fleet…")
 	}
 
+	if m.showTasks {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			pane(true, m.tasksVP.View()), m.statusLine(), m.footer())
+	}
+
 	left := pane(m.level == levelProjects, m.projList.View())
 	sess := pane(m.level == levelWork, m.sessions.View())
 	diff := pane(m.level == levelDetail, m.diff.View())
@@ -104,6 +109,12 @@ func (m Model) statusLine() string {
 		return dim.Render("filter: ") + m.filter.Value() + dim.Render("▏")
 	case m.banner != "":
 		return warn.Render(truncate("⚠ "+m.banner, m.width))
+	case m.showTasks:
+		scope := "all projects"
+		if m.taskScope {
+			scope = "selected project"
+		}
+		return dim.Render(truncate(fmt.Sprintf("kanban · %s · p to toggle scope", scope), m.width))
 	default:
 		agents := 0
 		for _, p := range m.projects {
@@ -119,7 +130,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · enter drill · esc back · d diff · w worktrees · h history · a attach · r resume · n new · A add · X untrack · C create · k kill · g gc · / filter · R · q"
+	keys := "↑↓ nav · enter drill · esc back · d diff · w worktrees · t tasks · h history · a attach · r resume · n new · A add · X untrack · C create · k kill · g gc · / filter · R · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
@@ -129,6 +140,8 @@ func (m Model) footer() string {
 		keys = "enter confirm · esc cancel"
 	case m.filtering:
 		keys = "type to filter · enter apply · esc cancel"
+	case m.showTasks:
+		keys = "↑↓ scroll · p project scope · / filter · esc close · R refresh"
 	}
 	return dim.Render(truncate(keys, m.width))
 }

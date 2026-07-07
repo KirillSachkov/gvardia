@@ -38,6 +38,11 @@ type Model struct {
 	diff     viewport.Model
 	filter   textinput.Model
 
+	tasks     []model.Task   // kanban snapshot from the brain
+	showTasks bool           // true while the full-screen tasks browser is open
+	taskScope bool           // in the tasks browser, limit to the selected project
+	tasksVP   viewport.Model // scrollable tasks browser content
+
 	level     navLevel
 	filtering bool   // true while the filter textinput is capturing input
 	loading   bool   // true until the first fleet result arrives
@@ -77,6 +82,7 @@ func New(cfg config.Config) Model {
 		projList:         projList,
 		sessions:         sessions,
 		diff:             viewport.New(),
+		tasksVP:          viewport.New(),
 		filter:           filter,
 		level:            levelProjects,
 		loading:          true,

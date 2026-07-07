@@ -25,8 +25,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fleetMsg:
 		m.loading = false
 		m.curated = msg.curated
+		m.tasks = msg.tasks
 		m.banner = failureBanner(msg.failures)
 		m.setProjects(msg.projects)
+		if m.showTasks {
+			m.rebuildTasks()
+		}
 		return m, tea.Batch(m.diffForSelection(), m.ensureHistory())
 
 	case projectsChangedMsg:
@@ -80,6 +84,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handlePathKey(msg)
 	case m.filtering:
 		return m.handleFilterKey(msg)
+	case m.showTasks:
+		return m.handleTasksKey(msg)
 	}
 
 	switch normalizeKey(msg.String()) {
@@ -129,6 +135,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.confirmGC()
 	case "n":
 		return m, m.openNewAgentPrompt()
+	case "t":
+		m.showTasks = true
+		m.rebuildTasks()
+		return m, nil
 	case "A":
 		return m, m.openPathPrompt(pathAdd)
 	case "C":
@@ -183,23 +193,36 @@ func (m Model) navigateDiff(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleFilterKey feeds keys to the filter input, applying it live.
+// handleFilterKey feeds keys to the filter input, applying it live. The filter
+// narrows the tasks browser when it is open, else the projects list.
 func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.filtering = false
 		m.filter.Blur()
 		m.filter.Reset()
+		if m.showTasks {
+			m.rebuildTasks()
+			return m, nil
+		}
 		m.refilter()
 		return m, m.diffForSelection()
 	case "enter":
 		m.filtering = false
 		m.filter.Blur()
+		if m.showTasks {
+			m.rebuildTasks()
+			return m, nil
+		}
 		return m, m.diffForSelection()
 	}
 
 	var cmd tea.Cmd
 	m.filter, cmd = m.filter.Update(msg)
+	if m.showTasks {
+		m.rebuildTasks()
+		return m, cmd
+	}
 	m.refilter()
 	return m, tea.Batch(cmd, m.diffForSelection())
 }
@@ -315,6 +338,10 @@ func (m *Model) layout() {
 	m.sessions.SetHeight(g.sessInnerH)
 	m.diff.SetWidth(g.rightInnerW)
 	m.diff.SetHeight(g.diffInnerH)
+
+	// The tasks browser is a single full-width pane above the footer.
+	m.tasksVP.SetWidth(max1(m.width - 2))
+	m.tasksVP.SetHeight(max1(m.height - footerHeight - 2))
 }
 
 func max1(n int) int {

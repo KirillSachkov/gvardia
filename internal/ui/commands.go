@@ -17,14 +17,17 @@ import (
 	"github.com/KirillSachkov/gvardia/internal/config"
 	"github.com/KirillSachkov/gvardia/internal/history"
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/tasks"
 )
 
 // fleetMsg carries a completed collect+adapters+join pass. curated is true when
-// the projects came from the tracked list rather than a roots scan.
+// the projects came from the tracked list rather than a roots scan; tasks is the
+// kanban snapshot, already linked to sessions.
 type fleetMsg struct {
 	projects []model.Project
 	failures []adapters.Failure
 	curated  bool
+	tasks    []model.Task
 }
 
 // projectsChangedMsg signals that the tracked project list was edited and the
@@ -72,7 +75,10 @@ func collectFleet(cfg config.Config) tea.Cmd {
 		sessions, failures := adapters.CollectSessions(ctx, adapters.Enabled(cfg))
 		projects = collect.AssembleLive(ctx, collect.Git{}, projects, sessions)
 		attachSummaries(ctx, history.New(), projects)
-		return fleetMsg{projects: projects, failures: failures, curated: curated}
+
+		taskList := tasks.Load(ctx, cfg.Brain)
+		tasks.LinkTasks(projects, taskList)
+		return fleetMsg{projects: projects, failures: failures, curated: curated, tasks: taskList}
 	}
 }
 

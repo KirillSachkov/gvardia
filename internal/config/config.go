@@ -29,6 +29,9 @@ type Config struct {
 	Base map[string]string `toml:"base"`
 	// Commands overrides the external CLIs gvardia shells out to.
 	Commands Commands `toml:"commands"`
+	// Brain is the root of the personal kanban (sachkov-os); its
+	// tasks/{inbox,active,done}/*.md files are the single task source. "~" is expanded.
+	Brain string `toml:"brain"`
 }
 
 // Commands holds overridable paths to the external CLIs gvardia invokes.
@@ -53,6 +56,7 @@ func Default() Config {
 		Adapters:        []string{"claude", "codex", "tmux"},
 		Base:            map[string]string{"default": "auto"},
 		Commands:        Commands{Lazygit: "lazygit"},
+		Brain:           "~/Work/sachkov-os",
 	}
 }
 
@@ -89,11 +93,13 @@ func DefaultPath() string {
 // (e.g. roots) on the command line.
 func ExpandPath(p string) string { return expandHome(p) }
 
-// finalize applies post-decode normalization: expand "~" in every root.
+// finalize applies post-decode normalization: expand "~" in every root and in
+// the brain path.
 func finalize(cfg Config) Config {
 	for i, r := range cfg.Roots {
 		cfg.Roots[i] = expandHome(r)
 	}
+	cfg.Brain = expandHome(cfg.Brain)
 	return cfg
 }
 

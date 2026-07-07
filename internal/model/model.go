@@ -36,6 +36,16 @@ type ChangeStat struct {
 	Removed int `json:"removed"`
 }
 
+// Task is one card from the personal kanban (sachkov-os/tasks). Status is the
+// kanban column, taken from the containing directory (inbox/active/done).
+type Task struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Status  string `json:"status"`
+	Project string `json:"project,omitempty"`
+	Path    string `json:"path"`
+}
+
 // Status is an agent session's coarse state, derived conservatively per adapter.
 type Status string
 
