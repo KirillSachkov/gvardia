@@ -1,0 +1,28 @@
+[
+  {
+    "pid": 12274,
+    "cwd": "/Users/dev/code/education-platform",
+    "kind": "interactive",
+    "startedAt": 1783148015569,
+    "sessionId": "cc09aa4e-1cb5-4601-912e-bcd167aa1e54",
+    "status": "idle"
+  },
+  {
+    "pid": 73112,
+    "cwd": "/Users/dev/code/software-engineer-tutorial",
+    "kind": "interactive",
+    "startedAt": 1783256672605,
+    "sessionId": "1893348d-6116-4a1a-ac1e-c75962cde25e",
+    "name": "software-engineer-tutorial-91",
+    "status": "busy"
+  },
+  {
+    "pid": 44398,
+    "cwd": "/Users/dev/code/gvardia",
+    "kind": "interactive",
+    "startedAt": 1783413553276,
+    "sessionId": "c3eba98a-0d9e-4bc1-8109-f7c855755e4b",
+    "name": "gvardia-01",
+    "status": "busy"
+  }
+]

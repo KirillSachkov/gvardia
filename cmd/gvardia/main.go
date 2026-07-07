@@ -42,7 +42,7 @@ func run(args []string) error {
 
 	switch fs.Arg(0) {
 	case "agents":
-		return runAgents(fs.Args()[1:])
+		return runAgents(fs.Args()[1:], *configPath)
 	case "projects":
 		return runProjects(fs.Args()[1:], *configPath)
 	case "":
