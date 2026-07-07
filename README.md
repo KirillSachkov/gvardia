@@ -18,22 +18,25 @@ viewing, or agent management. It aggregates state and shells out to proven tools
 ## What it looks like
 
 ```
-┌ gvardia ─────────────────────────────────────────────── ~/code · 4 agents live ┐
-│ PROJECTS             │ SESSIONS · education-platform                            │
-│▸education-platform   │ ● busy  claude  education-platform-18  epic/pr-dialogue ✱↑412↓88│
-│  84 wt · 3 live      │ ● busy  claude  education-platform-85  feat/675-s3       ↑90↓12 │
-│ sharp.arena          │ ◍ idle  codex   ab12ef90             fix/quiz-render    ↑30↓4  │
-│  5 wt · 0 live       │ ○ idle  claude  education-platform-da  dev                      │
-│ telegram-bot-flow    │                                                          │
-│  2 wt · 0 live       │                                                          │
-├──────────────────────┴──────────────────────────────────────────────────────┤
-│ DIFF · epic/pr-dialogue vs dev                                                 │
-│  backend/AccessService/…/InviteLink.cs            | 38 ++++--                   │
-│  frontend/src/features/pr-dialogue/ui/Thread.tsx  | 120 +++  …14 files, +412 -88│
+┌ PROJECTS (live first) ─┬ WORK · education-platform ───────────────────────────┐
+│▸education-platform 3●  │  st   harness agent          task   branch        Δ  last│
+│  se-tutorial      2●   │  ● busy  claude edu-85        #675  feat/675-s3 +90/-12 2m│
+│  senior-ticker    1○   │  ● busy  claude edu-18        #712  epic/pr-dial +412/-8 5m│
+│  OpenTicker       0    │  ○ idle  claude edu-da         —    dev                 1h│
+│  … (0 live)            │  ✓ ended codex  ab12ef90      #649  fix/quiz     +30/-4  3h│
+├────────────────────────┴──────────────────────────────────────────────────────┤
+│ DETAIL · edu-85                                                                 │
+│ Finish OpenIddict snake_case + review fixes for s3                             │
+│ busy claude · #675 · feat/675-s3 · 14 files +90 -12 · 2m         [enter] lazygit│
 ├────────────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ nav · tab focus · enter diff · a attach · n new · k kill · g gc · / filter · q│
+│ ↑↓ nav · tab · enter diff · h history · a attach · n new · k kill · g gc · q     │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Each row is one agent session: live agents first (honest process-backed status),
+then recent **ended** sessions when you press `h`. The summary is the agent's own
+session title (or first prompt), pulled from its transcript. The task is inferred
+from the branch name.
 
 ## Install
 
@@ -69,18 +72,19 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 |------------|----------------------------------------------------------------|
 | `↑↓` `j k` | navigate the focused pane                                      |
 | `tab`      | switch focus between projects and sessions                     |
-| `enter`    | open the selected worktree in `lazygit` (fallback: `git diff`) |
+| `enter`    | open the selected session's worktree in `lazygit` (fallback: `git diff`) |
+| `h`        | toggle recent ended sessions (history) in the work pane        |
 | `a`        | attach: `tmux attach`, else resume the session's harness       |
 | `r`        | resume the session (`claude --resume`, `codex resume`)         |
 | `n`        | new agent: pick a harness, name it, spawn it                   |
-| `k`        | kill the session process (SIGTERM, confirms first)             |
+| `k`        | kill the live session process (SIGTERM, confirms first)        |
 | `g`        | gc merged/stale worktrees via `wt-prune` (confirms first)      |
 | `/`        | filter projects by name or branch                              |
 | `R`        | force refresh now                                              |
 | `q`        | quit                                                           |
 
-Status glyphs: `●` busy · `○` idle · `◍` codex · `✖` failed. A branch shows `✱`
-when dirty and `↑n↓m` for ahead/behind its base.
+Status glyphs: `●` busy · `○` idle · `◍` codex · `✓` ended (history) · `✖` failed.
+The `Δ` column is the session's diff vs its base branch (`+added/-removed`).
 
 ## Configuration
 
