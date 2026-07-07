@@ -1,0 +1,140 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/KirillSachkov/gvardia/internal/adapters"
+)
+
+// footerHeight is the number of lines reserved below the body: a status line and
+// the keybind footer.
+const footerHeight = 2
+
+var (
+	borderActive   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("62"))
+	borderInactive = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
+	dim            = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	warn           = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+)
+
+// geo holds the derived pane geometry for the current terminal size.
+type geo struct {
+	leftInnerW, leftInnerH int
+	rightInnerW            int
+	sessInnerH, diffInnerH int
+}
+
+// geometry derives pane sizes from the terminal dimensions. It is the single
+// source of layout truth, used by both layout() and View().
+func (m Model) geometry() geo {
+	bodyH := m.height - footerHeight
+	if bodyH < 3 {
+		bodyH = 3
+	}
+	leftW := m.width * 34 / 100
+	if leftW < 28 {
+		leftW = 28
+	}
+	if leftW > m.width-20 {
+		leftW = m.width - 20
+	}
+	rightW := m.width - leftW
+	sessH := bodyH / 2
+
+	return geo{
+		leftInnerW: max1(leftW - 2), leftInnerH: max1(bodyH - 2),
+		rightInnerW: max1(rightW - 2),
+		sessInnerH:  max1(sessH - 2), diffInnerH: max1(bodyH - sessH - 2),
+	}
+}
+
+// View renders the cockpit into a full-screen (alt-screen) view.
+func (m Model) View() tea.View {
+	v := tea.NewView(m.render())
+	v.AltScreen = true
+	return v
+}
+
+// render composes the three bordered panes plus a status line and footer.
+func (m Model) render() string {
+	if m.width == 0 || m.height == 0 {
+		return ""
+	}
+	if m.loading && len(m.projects) == 0 {
+		return lipgloss.Place(m.width, m.height,
+			lipgloss.Center, lipgloss.Center, "collecting fleet…")
+	}
+
+	left := pane(m.focus == focusProjects, m.projList.View())
+	sess := pane(m.focus == focusSessions, m.sessions.View())
+	diff := pane(false, m.diff.View())
+	right := lipgloss.JoinVertical(lipgloss.Left, sess, diff)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.statusLine(), m.footer())
+}
+
+// pane wraps content in a rounded border, brighter when focused.
+func pane(focused bool, content string) string {
+	if focused {
+		return borderActive.Render(content)
+	}
+	return borderInactive.Render(content)
+}
+
+// statusLine shows the filter, an adapter banner, or a fleet summary.
+func (m Model) statusLine() string {
+	switch {
+	case m.filtering:
+		return dim.Render("filter: ") + m.filter.Value() + dim.Render("▏")
+	case m.banner != "":
+		return warn.Render(truncate("⚠ "+m.banner, m.width))
+	default:
+		agents := 0
+		for _, p := range m.projects {
+			agents += p.LiveAgents
+		}
+		return dim.Render(truncate(
+			fmt.Sprintf("%d projects · %d live agents", len(m.projects), agents), m.width))
+	}
+}
+
+// footer renders the keybind hints for the current mode.
+func (m Model) footer() string {
+	keys := "↑↓ nav · tab focus · / filter · R refresh · q quit"
+	if m.filtering {
+		keys = "type to filter · enter apply · esc cancel"
+	}
+	return dim.Render(truncate(keys, m.width))
+}
+
+// failureBanner summarizes skipped adapters for the status line.
+func failureBanner(failures []adapters.Failure) string {
+	if len(failures) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(failures))
+	for _, f := range failures {
+		names = append(names, f.Adapter)
+	}
+	return "adapters skipped: " + strings.Join(names, ", ")
+}
+
+// truncate clips s to at most width display cells, appending an ellipsis.
+func truncate(s string, width int) string {
+	if width <= 0 || lipgloss.Width(s) <= width {
+		return s
+	}
+	if width <= 1 {
+		return "…"
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
+}

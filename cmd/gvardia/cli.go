@@ -5,20 +5,17 @@ import (
 	"fmt"
 
 	"github.com/KirillSachkov/gvardia/internal/config"
+	"github.com/KirillSachkov/gvardia/internal/ui"
 )
 
-// runCockpit is the default command (no subcommand). Phase 3 replaces this with
-// the Bubble Tea UI; for now it loads the config and reports readiness so the
-// binary is useful and proves config loading end-to-end.
+// runCockpit is the default command (no subcommand): it loads config and launches
+// the Bubble Tea cockpit.
 func runCockpit(configPath string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("gvardia %s — cockpit UI lands in Phase 3.\n", version)
-	fmt.Printf("scanning %d root(s): %v\n", len(cfg.Roots), cfg.Roots)
-	fmt.Println("try: gvardia --version | gvardia agents --json")
-	return nil
+	return ui.Run(cfg)
 }
 
 // usage prints top-level help. The hidden `agents` subcommand is intentionally
