@@ -86,9 +86,13 @@ func pane(focused bool, content string) string {
 	return borderInactive.Render(content)
 }
 
-// statusLine shows the filter, an adapter banner, or a fleet summary.
+// statusLine shows a modal prompt, the filter, an adapter banner, or a summary.
 func (m Model) statusLine() string {
 	switch {
+	case m.confirm != nil:
+		return warn.Render(truncate(m.confirm.message+" (y/n)", m.width))
+	case m.prompt != nil:
+		return dim.Render("new "+m.prompt.harness+" agent: ") + m.prompt.input.View()
 	case m.filtering:
 		return dim.Render("filter: ") + m.filter.Value() + dim.Render("▏")
 	case m.banner != "":
@@ -105,8 +109,13 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · tab focus · enter diff · / filter · R refresh · q quit"
-	if m.filtering {
+	keys := "↑↓ nav · tab focus · enter diff · a attach · r resume · n new · k kill · g gc · / filter · R refresh · q quit"
+	switch {
+	case m.confirm != nil:
+		keys = "y confirm · n cancel"
+	case m.prompt != nil:
+		keys = "tab harness · enter create · esc cancel"
+	case m.filtering:
 		keys = "type to filter · enter apply · esc cancel"
 	}
 	return dim.Render(truncate(keys, m.width))

@@ -37,6 +37,9 @@ type Model struct {
 	filtering bool   // true while the filter textinput is capturing input
 	loading   bool   // true until the first fleet result arrives
 	banner    string // last adapter/collector error, shown in the footer area
+
+	confirm *confirmPrompt  // non-nil while a y/n confirmation is pending
+	prompt  *newAgentPrompt // non-nil while the new-agent form is open
 }
 
 // New builds the initial cockpit model. Component sizes are placeholders until

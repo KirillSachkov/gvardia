@@ -43,6 +43,7 @@ const (
 type Session struct {
 	Harness   string    `json:"harness"` // adapter Name(): "claude", "codex", …
 	Name      string    `json:"name"`
+	SessionID string    `json:"sessionId,omitempty"` // harness resume key (empty for tmux)
 	PID       int       `json:"pid"`
 	Cwd       string    `json:"cwd"`
 	Branch    string    `json:"branch"`

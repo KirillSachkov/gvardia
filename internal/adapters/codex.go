@@ -84,6 +84,7 @@ func (c Codex) Sessions(ctx context.Context) ([]model.Session, error) {
 		sessions = append(sessions, model.Session{
 			Harness:   "codex",
 			Name:      shortID(m.SessionID),
+			SessionID: m.SessionID,
 			Cwd:       cwd,
 			Status:    status,
 			StartedAt: m.Started,

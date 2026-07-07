@@ -54,6 +54,7 @@ func parseClaudeSessions(data []byte) ([]model.Session, error) {
 		sessions = append(sessions, model.Session{
 			Harness:   "claude",
 			Name:      name,
+			SessionID: a.SessionID,
 			PID:       a.PID,
 			Cwd:       a.Cwd,
 			Status:    claudeStatus(a.Status),

@@ -9,12 +9,12 @@ import (
 )
 
 func TestParseTmuxPanes(t *testing.T) {
-	// path \t pid \t command
+	// path \t pid \t session_name \t command
 	data := []byte(
-		"/Users/dev/code/proj-a\t111\tclaude\n" +
-			"/Users/dev/code/proj-b\t222\tzsh\n" +
-			"/Users/dev/code/proj-c\t333\tcodex\n" +
-			"/Users/dev/code/proj-d\t444\tvim\n")
+		"/Users/dev/code/proj-a\t111\twork\tclaude\n" +
+			"/Users/dev/code/proj-b\t222\tmisc\tzsh\n" +
+			"/Users/dev/code/proj-c\t333\tagents\tcodex\n" +
+			"/Users/dev/code/proj-d\t444\tedit\tvim\n")
 
 	sessions := parseTmuxPanes(data)
 	if len(sessions) != 2 {
@@ -22,6 +22,9 @@ func TestParseTmuxPanes(t *testing.T) {
 	}
 	if sessions[0].Cwd != "/Users/dev/code/proj-a" || sessions[0].Name != "claude" {
 		t.Errorf("sessions[0] = %+v", sessions[0])
+	}
+	if sessions[0].SessionID != "work" {
+		t.Errorf("sessions[0].SessionID = %q, want tmux session name 'work'", sessions[0].SessionID)
 	}
 	if sessions[0].PID != 111 || sessions[0].Status != model.StatusBusy {
 		t.Errorf("sessions[0] pid/status = %d/%q", sessions[0].PID, sessions[0].Status)

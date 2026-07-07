@@ -35,8 +35,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case execDoneMsg:
-		// Returned from lazygit/git-diff: refresh in case the user changed things.
+		// Returned from lazygit/git-diff/action: refresh in case things changed.
 		return m, tea.Batch(collectFleet(m.cfg), m.diffForSelection())
+
+	case spawnMsg:
+		return m, spawnHarness(msg.harness, msg.dir)
 
 	case tickMsg:
 		// Re-collect and re-arm the ticker (Bubble Tea ticks once per call).
@@ -48,9 +51,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleKey routes a key press to filter input or navigation.
+// handleKey routes a key press. Modals (confirm, new-agent) take priority, then
+// the filter input, then global keys and navigation.
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.filtering {
+	switch {
+	case m.confirm != nil:
+		return m.handleConfirmKey(msg)
+	case m.prompt != nil:
+		return m.handlePromptKey(msg)
+	case m.filtering:
 		return m.handleFilterKey(msg)
 	}
 
@@ -74,6 +83,22 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, enterDiff(*w, m.cfg)
 		}
 		return m, nil
+	case "a":
+		if w := m.selectedWorktree(); w != nil {
+			return m, attachSession(*w)
+		}
+		return m, nil
+	case "r":
+		if w := m.selectedWorktree(); w != nil {
+			return m, resumeSession(*w)
+		}
+		return m, nil
+	case "k":
+		return m.confirmKill()
+	case "g":
+		return m.confirmGC()
+	case "n":
+		return m, m.openNewAgentPrompt()
 	}
 
 	if m.focus == focusProjects {

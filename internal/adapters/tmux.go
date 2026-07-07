@@ -35,7 +35,7 @@ func (t Tmux) Sessions(ctx context.Context) ([]model.Session, error) {
 		run = execCommand
 	}
 	out, err := run(ctx, "tmux", "list-panes", "-a", "-F",
-		"#{pane_current_path}\t#{pane_pid}\t#{pane_current_command}")
+		"#{pane_current_path}\t#{pane_pid}\t#{session_name}\t#{pane_current_command}")
 	if err != nil {
 		return nil, err
 	}
@@ -48,21 +48,22 @@ func parseTmuxPanes(data []byte) []model.Session {
 		if line == "" {
 			continue
 		}
-		fields := strings.SplitN(line, "\t", 3)
-		if len(fields) != 3 {
+		fields := strings.SplitN(line, "\t", 4)
+		if len(fields) != 4 {
 			continue
 		}
-		path, pidStr, command := fields[0], fields[1], fields[2]
+		path, pidStr, session, command := fields[0], fields[1], fields[2], fields[3]
 		if !agentCommands[command] {
 			continue
 		}
 		pid, _ := strconv.Atoi(pidStr)
 		sessions = append(sessions, model.Session{
-			Harness: "tmux",
-			Name:    command,
-			PID:     pid,
-			Cwd:     path,
-			Status:  model.StatusBusy, // a live pane running an agent command
+			Harness:   "tmux",
+			Name:      command,
+			SessionID: session, // tmux session name = `tmux attach -t` target
+			PID:       pid,
+			Cwd:       path,
+			Status:    model.StatusBusy, // a live pane running an agent command
 		})
 	}
 	return sessions
