@@ -94,6 +94,12 @@ func (m Model) statusLine() string {
 		return warn.Render(truncate(m.confirm.message+" (y/n)", m.width))
 	case m.prompt != nil:
 		return dim.Render("new "+m.prompt.harness+" agent: ") + m.prompt.input.View()
+	case m.pathPrompt != nil:
+		label := "add project: "
+		if m.pathPrompt.mode == pathCreate {
+			label = "create project: "
+		}
+		return dim.Render(label) + m.pathPrompt.input.View()
 	case m.filtering:
 		return dim.Render("filter: ") + m.filter.Value() + dim.Render("▏")
 	case m.banner != "":
@@ -103,19 +109,24 @@ func (m Model) statusLine() string {
 		for _, p := range m.projects {
 			agents += p.LiveAgents
 		}
-		return dim.Render(truncate(
-			fmt.Sprintf("%d projects · %d live agents", len(m.projects), agents), m.width))
+		line := fmt.Sprintf("%d projects · %d live agents", len(m.projects), agents)
+		if !m.curated {
+			line += " · A to curate"
+		}
+		return dim.Render(truncate(line, m.width))
 	}
 }
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · enter drill · esc back · d diff · h history · a attach · r resume · n new · k kill · g gc · / filter · R · q"
+	keys := "↑↓ nav · enter drill · esc back · d diff · h history · a attach · r resume · n new · A add · X untrack · C create · k kill · g gc · / filter · R · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
 	case m.prompt != nil:
 		keys = "tab harness · enter create · esc cancel"
+	case m.pathPrompt != nil:
+		keys = "enter confirm · esc cancel"
 	case m.filtering:
 		keys = "type to filter · enter apply · esc cancel"
 	}

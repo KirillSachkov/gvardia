@@ -21,6 +21,20 @@ type newAgentPrompt struct {
 	input   textinput.Model
 }
 
+// pathMode distinguishes the two project-curation prompts.
+type pathMode int
+
+const (
+	pathAdd    pathMode = iota // track an existing git repo
+	pathCreate                 // git init a new repo, then track it
+)
+
+// pathPrompt is the add/create-project form: a single path input.
+type pathPrompt struct {
+	mode  pathMode
+	input textinput.Model
+}
+
 // handleConfirmKey resolves a pending confirmation.
 func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	action := m.confirm.action
@@ -62,6 +76,62 @@ func (m Model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.prompt.input, cmd = m.prompt.input.Update(msg)
 	return m, cmd
+}
+
+// handlePathKey drives the add/create-project path form. The text input receives
+// the original key so Cyrillic paths type through unchanged.
+func (m Model) handlePathKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.pathPrompt = nil
+		return m, nil
+	case "enter":
+		path := strings.TrimSpace(m.pathPrompt.input.Value())
+		mode := m.pathPrompt.mode
+		m.pathPrompt = nil
+		if path == "" {
+			m.banner = "path required"
+			return m, nil
+		}
+		if mode == pathAdd {
+			return m, trackProject(path)
+		}
+		return m, createProject(path)
+	}
+	var cmd tea.Cmd
+	m.pathPrompt.input, cmd = m.pathPrompt.input.Update(msg)
+	return m, cmd
+}
+
+// openPathPrompt initializes and focuses the add/create-project form.
+func (m *Model) openPathPrompt(mode pathMode) tea.Cmd {
+	in := textinput.New()
+	if mode == pathAdd {
+		in.Placeholder = "path to an existing git repo…"
+	} else {
+		in.Placeholder = "path for a new project (git init)…"
+	}
+	m.pathPrompt = &pathPrompt{mode: mode, input: in}
+	return m.pathPrompt.input.Focus()
+}
+
+// confirmUntrack opens a confirmation to drop the selected project from the
+// curated list. It never deletes the repo on disk.
+func (m Model) confirmUntrack() (tea.Model, tea.Cmd) {
+	p := m.selectedProject()
+	if p == nil {
+		m.banner = "no project selected to untrack"
+		return m, nil
+	}
+	if !m.curated {
+		m.banner = "press A to start curating before untracking"
+		return m, nil
+	}
+	m.confirm = &confirmPrompt{
+		message: fmt.Sprintf("untrack %s? (repo stays on disk)", p.Name),
+		action:  untrackProject(p.Path),
+	}
+	return m, nil
 }
 
 // confirmKill opens a confirmation to SIGTERM the selected live session's

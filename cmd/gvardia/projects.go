@@ -33,7 +33,12 @@ func runProjects(args []string, configPath string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	projects, err := collect.Collect(ctx, collect.Git{}, cfg)
+	var projects []model.Project
+	if tracked, _ := config.LoadTracked(); len(tracked) > 0 {
+		projects, err = collect.CollectTracked(ctx, collect.Git{}, cfg, tracked)
+	} else {
+		projects, err = collect.Collect(ctx, collect.Git{}, cfg)
+	}
 	if err != nil {
 		return err
 	}

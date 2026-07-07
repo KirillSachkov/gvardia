@@ -24,9 +24,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case fleetMsg:
 		m.loading = false
+		m.curated = msg.curated
 		m.banner = failureBanner(msg.failures)
 		m.setProjects(msg.projects)
 		return m, tea.Batch(m.diffForSelection(), m.ensureHistory())
+
+	case projectsChangedMsg:
+		return m, collectFleet(m.cfg)
 
 	case errMsg:
 		m.loading = false
@@ -72,6 +76,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKey(msg)
 	case m.prompt != nil:
 		return m.handlePromptKey(msg)
+	case m.pathPrompt != nil:
+		return m.handlePathKey(msg)
 	case m.filtering:
 		return m.handleFilterKey(msg)
 	}
@@ -118,6 +124,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.confirmGC()
 	case "n":
 		return m, m.openNewAgentPrompt()
+	case "A":
+		return m, m.openPathPrompt(pathAdd)
+	case "C":
+		return m, m.openPathPrompt(pathCreate)
+	case "X":
+		return m.confirmUntrack()
 	}
 
 	switch m.level {

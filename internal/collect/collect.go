@@ -21,7 +21,20 @@ import (
 // Collect discovers every project under cfg.Roots and returns them with fully
 // enriched worktrees, sorted by name. Individual repo errors are skipped.
 func Collect(ctx context.Context, runner Runner, cfg config.Config) ([]model.Project, error) {
-	candidates := DiscoverRepos(cfg.Roots)
+	return collectFrom(ctx, runner, cfg, DiscoverRepos(cfg.Roots))
+}
+
+// CollectTracked enriches an explicit list of project roots, skipping discovery.
+// Each path is treated as a repo root; its linked worktrees are found via git.
+// Paths that are not git repos are silently skipped (a partial fleet beats none).
+func CollectTracked(ctx context.Context, runner Runner, cfg config.Config, paths []string) ([]model.Project, error) {
+	return collectFrom(ctx, runner, cfg, paths)
+}
+
+// collectFrom is the shared enrichment pipeline used by both Collect (roots scan)
+// and CollectTracked (explicit list): list worktrees per candidate, collapse to
+// one project per primary, then enrich every worktree concurrently.
+func collectFrom(ctx context.Context, runner Runner, cfg config.Config, candidates []string) ([]model.Project, error) {
 	sem := make(chan struct{}, concurrency())
 
 	// Phase 1: list worktrees per candidate, collapsing to one entry per primary.

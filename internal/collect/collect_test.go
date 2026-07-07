@@ -78,6 +78,38 @@ func TestCollectIntegration(t *testing.T) {
 	}
 }
 
+// TestCollectTrackedOnlyListsGivenPaths verifies curation: only the explicit
+// paths become projects, and a non-repo path is skipped rather than erroring.
+func TestCollectTrackedOnlyListsGivenPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	repo := filepath.Join(root, "tracked")
+	git(t, root, "init", "-b", "main", "tracked")
+	git(t, repo, "config", "user.email", "test@example.com")
+	git(t, repo, "config", "user.name", "Test")
+	writeFile(t, filepath.Join(repo, "README.md"), "hi\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "init")
+
+	notRepo := filepath.Join(root, "not-a-repo")
+	if err := os.MkdirAll(notRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	projects, err := CollectTracked(context.Background(), Git{}, config.Default(), []string{repo, notRepo})
+	if err != nil {
+		t.Fatalf("CollectTracked: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("got %d projects, want 1 (non-repo skipped): %+v", len(projects), projects)
+	}
+	if projects[0].Name != "tracked" {
+		t.Errorf("project Name = %q, want tracked", projects[0].Name)
+	}
+}
+
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

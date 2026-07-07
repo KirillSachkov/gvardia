@@ -46,9 +46,11 @@ type Model struct {
 	showHistory      bool                       // include ended sessions in the work pane
 	historyByProject map[string][]model.Session // lazily loaded, keyed by project path
 	sessionList      []model.Session            // rows currently in the work table (cursor maps here)
+	curated          bool                       // true when showing a curated tracked list (not a roots scan)
 
-	confirm *confirmPrompt  // non-nil while a y/n confirmation is pending
-	prompt  *newAgentPrompt // non-nil while the new-agent form is open
+	confirm    *confirmPrompt  // non-nil while a y/n confirmation is pending
+	prompt     *newAgentPrompt // non-nil while the new-agent form is open
+	pathPrompt *pathPrompt     // non-nil while the add/create-project path form is open
 }
 
 // New builds the initial cockpit model. Component sizes are placeholders until

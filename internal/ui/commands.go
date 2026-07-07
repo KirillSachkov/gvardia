@@ -19,11 +19,17 @@ import (
 	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
-// fleetMsg carries a completed collect+adapters+join pass.
+// fleetMsg carries a completed collect+adapters+join pass. curated is true when
+// the projects came from the tracked list rather than a roots scan.
 type fleetMsg struct {
 	projects []model.Project
 	failures []adapters.Failure
+	curated  bool
 }
+
+// projectsChangedMsg signals that the tracked project list was edited and the
+// fleet should be re-collected.
+type projectsChangedMsg struct{}
 
 // errMsg carries a fatal-to-this-pass error (rendered as a banner, not a crash).
 type errMsg struct{ err error }
@@ -50,15 +56,100 @@ func collectFleet(cfg config.Config) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		projects, err := collect.Collect(ctx, collect.Git{}, cfg)
+		tracked, _ := config.LoadTracked()
+		curated := len(tracked) > 0
+
+		var projects []model.Project
+		var err error
+		if curated {
+			projects, err = collect.CollectTracked(ctx, collect.Git{}, cfg, tracked)
+		} else {
+			projects, err = collect.Collect(ctx, collect.Git{}, cfg)
+		}
 		if err != nil {
 			return errMsg{err}
 		}
 		sessions, failures := adapters.CollectSessions(ctx, adapters.Enabled(cfg))
 		projects = collect.AssembleLive(ctx, collect.Git{}, projects, sessions)
 		attachSummaries(ctx, history.New(), projects)
-		return fleetMsg{projects: projects, failures: failures}
+		return fleetMsg{projects: projects, failures: failures, curated: curated}
 	}
+}
+
+// addTracked appends path to the curated list (deduplicated) and persists it.
+func addTracked(path string) error {
+	tracked, err := config.LoadTracked()
+	if err != nil {
+		return err
+	}
+	for _, p := range tracked {
+		if p == path {
+			return nil // already tracked
+		}
+	}
+	return config.SaveTracked(append(tracked, path))
+}
+
+// trackProject validates that path is a git repo, then adds it to the curated
+// list. It runs as a tea.Cmd (pure I/O).
+func trackProject(path string) tea.Cmd {
+	return func() tea.Msg {
+		path = absExpand(path)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+			return errMsg{fmt.Errorf("not a git repo: %s", path)}
+		}
+		if err := addTracked(path); err != nil {
+			return errMsg{err}
+		}
+		return projectsChangedMsg{}
+	}
+}
+
+// createProject git-inits a new repo at path, then tracks it.
+func createProject(path string) tea.Cmd {
+	return func() tea.Msg {
+		path = absExpand(path)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if out, err := exec.CommandContext(ctx, "git", "init", path).CombinedOutput(); err != nil {
+			return errMsg{fmt.Errorf("git init: %w: %s", err, strings.TrimSpace(string(out)))}
+		}
+		if err := addTracked(path); err != nil {
+			return errMsg{err}
+		}
+		return projectsChangedMsg{}
+	}
+}
+
+// untrackProject removes path from the curated list (never touches the repo).
+func untrackProject(path string) tea.Cmd {
+	return func() tea.Msg {
+		tracked, err := config.LoadTracked()
+		if err != nil {
+			return errMsg{err}
+		}
+		kept := make([]string, 0, len(tracked))
+		for _, p := range tracked {
+			if p != path {
+				kept = append(kept, p)
+			}
+		}
+		if err := config.SaveTracked(kept); err != nil {
+			return errMsg{err}
+		}
+		return projectsChangedMsg{}
+	}
+}
+
+// absExpand expands a leading "~" and makes the path absolute where possible.
+func absExpand(path string) string {
+	path = config.ExpandPath(path)
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // attachSummaries fills each live work-session's Summary from its transcript.
