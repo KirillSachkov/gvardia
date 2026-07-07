@@ -12,6 +12,7 @@ import (
 	"github.com/KirillSachkov/gvardia/internal/adapters"
 	"github.com/KirillSachkov/gvardia/internal/collect"
 	"github.com/KirillSachkov/gvardia/internal/config"
+	"github.com/KirillSachkov/gvardia/internal/history"
 	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
@@ -42,7 +43,8 @@ func runAgents(args []string, configPath string) error {
 		return err
 	}
 	sessions, failures := adapters.CollectSessions(ctx, adapters.Enabled(cfg))
-	projects = collect.Join(projects, sessions)
+	projects = collect.AssembleLive(ctx, collect.Git{}, projects, sessions)
+	attachSummaries(ctx, history.New(), projects)
 
 	for _, f := range failures {
 		fmt.Fprintf(os.Stderr, "gvardia: adapter %s skipped: %v\n", f.Adapter, f.Err)
@@ -55,24 +57,39 @@ func runAgents(args []string, configPath string) error {
 	}
 
 	for _, p := range projects {
-		if p.LiveAgents == 0 {
+		if len(p.WorkSessions) == 0 {
 			continue
 		}
-		fmt.Printf("%s — %d agent(s)\n", p.Name, p.LiveAgents)
-		for _, w := range p.Worktrees {
-			for _, s := range w.Sessions {
-				fmt.Printf("  %s\n", formatSession(s, w))
-			}
+		fmt.Printf("%s — %d agent(s)\n", p.Name, len(p.WorkSessions))
+		for _, s := range p.WorkSessions {
+			fmt.Printf("  %s\n", formatSession(s))
 		}
 	}
 	return nil
 }
 
-// formatSession renders a one-line human summary of an agent session.
-func formatSession(s model.Session, w model.Worktree) string {
-	branch := w.Branch
+// attachSummaries fills each live work-session's Summary from its transcript.
+func attachSummaries(ctx context.Context, hist history.Reader, projects []model.Project) {
+	for pi := range projects {
+		for si := range projects[pi].WorkSessions {
+			s := &projects[pi].WorkSessions[si]
+			if s.Summary == "" {
+				s.Summary = hist.SummaryFor(ctx, s.Harness, s.SessionID, s.Cwd)
+			}
+		}
+	}
+}
+
+// formatSession renders a one-line human summary of a work-session.
+func formatSession(s model.Session) string {
+	branch := s.Branch
 	if branch == "" {
 		branch = "(detached)"
 	}
-	return fmt.Sprintf("%-6s %-8s %-30s %s", s.Status, s.Harness, s.Name, branch)
+	task := s.Task
+	if task == "" {
+		task = "—"
+	}
+	return fmt.Sprintf("%-6s %-8s %-24s %-6s %-24s +%d/-%d  %s",
+		s.Status, s.Harness, s.Name, task, branch, s.ChangeStat.Added, s.ChangeStat.Removed, s.Summary)
 }
