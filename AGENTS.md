@@ -5,9 +5,11 @@ built. If you are an agent (Claude Code, Codex, …) dispatched to work here, re
 in this order:
 
 1. `docs/DESIGN.md` — architecture, scope, tech choice. Source of truth.
-2. `docs/PLAN.md` — implement **phase by phase, in order**; each phase's
+2. `docs/GO-CONVENTIONS.md` — how to write Go + Bubble Tea here. **Read before
+   writing code** — it exists to prevent "C#-in-Go".
+3. `docs/PLAN.md` — implement **phase by phase, in order**; each phase's
    *Acceptance* is a gate. Commit after each phase.
-3. `docs/ROADMAP.md` — do **not** build these yet; they are post-v1.
+4. `docs/ROADMAP.md` — do **not** build these yet; they are post-v1.
 
 ## What gvardia is
 
@@ -27,6 +29,9 @@ it aggregates state and shells out to `lazygit`/`delta`/`tmux`/agent CLIs. It is
 - Every phase ends green: `go build ./... && go vet ./... && go test ./...`.
 - Degrade gracefully when an external CLI (`lazygit`, `tmux`, an agent CLI) is
   absent — skip with a banner, never crash.
+- Follow `docs/GO-CONVENTIONS.md`: errors as values, `context` first, no I/O in
+  Bubble Tea `Update`/`View` (I/O → `tea.Cmd`), shell out via `tea.ExecProcess`,
+  table-driven tests, `gofmt`/`golangci-lint` clean.
 
 ## Guardrails
 
