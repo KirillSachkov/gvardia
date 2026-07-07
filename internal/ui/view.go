@@ -105,7 +105,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · tab focus · / filter · R refresh · q quit"
+	keys := "↑↓ nav · tab focus · enter diff · / filter · R refresh · q quit"
 	if m.filtering {
 		keys = "type to filter · enter apply · esc cancel"
 	}

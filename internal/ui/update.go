@@ -34,6 +34,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diff.GotoTop()
 		return m, nil
 
+	case execDoneMsg:
+		// Returned from lazygit/git-diff: refresh in case the user changed things.
+		return m, tea.Batch(collectFleet(m.cfg), m.diffForSelection())
+
 	case tickMsg:
 		// Re-collect and re-arm the ticker (Bubble Tea ticks once per call).
 		return m, tea.Batch(collectFleet(m.cfg), tick(m.cfg.RefreshInterval.Duration))
@@ -65,6 +69,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.filter.Focus()
 	case "R":
 		return m, collectFleet(m.cfg)
+	case "enter":
+		if w := m.selectedWorktree(); w != nil {
+			return m, enterDiff(*w, m.cfg)
+		}
+		return m, nil
 	}
 
 	if m.focus == focusProjects {

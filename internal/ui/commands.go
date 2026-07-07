@@ -55,6 +55,48 @@ func tick(interval time.Duration) tea.Cmd {
 	return tea.Every(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// execDoneMsg signals that an external program (lazygit/git diff) has exited and
+// the TUI has the terminal back.
+type execDoneMsg struct{}
+
+// enterDiff hands the terminal to an interactive diff viewer for the worktree and
+// returns to the TUI when it exits.
+func enterDiff(wt model.Worktree, cfg config.Config) tea.Cmd {
+	cmd := diffCommand(wt, cfg)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return errMsg{fmt.Errorf("diff viewer: %w", err)}
+		}
+		return execDoneMsg{}
+	})
+}
+
+// diffCommand builds the interactive diff command: lazygit rooted at the worktree
+// (via cwd, which handles linked worktrees whose .git is a file), or a git-diff
+// fallback through delta when lazygit is absent.
+func diffCommand(wt model.Worktree, cfg config.Config) *exec.Cmd {
+	lazygit := cfg.Commands.Lazygit
+	if lazygit == "" {
+		lazygit = "lazygit"
+	}
+	if _, err := exec.LookPath(lazygit); err == nil {
+		cmd := exec.Command(lazygit)
+		cmd.Dir = wt.Path
+		return cmd
+	}
+
+	rangeArg := "HEAD"
+	if wt.BaseBranch != "" {
+		rangeArg = wt.BaseBranch + "...HEAD"
+	}
+	args := []string{"-C", wt.Path}
+	if _, err := exec.LookPath("delta"); err == nil {
+		args = append(args, "-c", "core.pager=delta")
+	}
+	args = append(args, "diff", rangeArg)
+	return exec.Command("git", args...)
+}
+
 // diffStat computes `git -C <path> diff --stat <base>...HEAD` for a worktree.
 func diffStat(path, base string) tea.Cmd {
 	return func() tea.Msg {
