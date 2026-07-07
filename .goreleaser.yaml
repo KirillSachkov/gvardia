@@ -1,0 +1,68 @@
+version: 2
+
+project_name: gvardia
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: gvardia
+    main: ./cmd/gvardia
+    binary: gvardia
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+  - id: wt-prune
+    main: ./cmd/wt-prune
+    binary: wt-prune
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    ids: [gvardia, wt-prune]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+homebrew_casks:
+  - name: gvardia
+    ids: [default]
+    repository:
+      owner: KirillSachkov
+      name: homebrew-tap
+      # A PAT with push access to the tap repo (GITHUB_TOKEN can't push cross-repo).
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/KirillSachkov/gvardia"
+    description: "Terminal cockpit over a fleet of coding agents across all your projects"
+    # gvardia degrades gracefully without these, so keep them optional.
+    dependencies:
+      - formula: lazygit
+      - formula: git-delta
+    # Install both binaries from the archive (gvardia + its wt-prune companion).
+    binaries: [gvardia, wt-prune]
+    # Strip the quarantine flag so the unsigned binaries run without a Gatekeeper prompt.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/gvardia"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/wt-prune"]
+          end
+
+release:
+  github:
+    owner: KirillSachkov
+    name: gvardia
+
+changelog:
+  use: github
+  sort: asc
