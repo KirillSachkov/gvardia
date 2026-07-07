@@ -64,5 +64,5 @@ release:
     name: gvardia
 
 changelog:
-  use: github
+  use: git
   sort: asc
