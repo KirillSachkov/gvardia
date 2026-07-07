@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# wt-prune — list & clean up merged/stale git worktrees across all your projects.
+#
+# Part of the gvardia toolkit. Usable standalone today (before the TUI exists).
+# SAFE BY DEFAULT: dry-run unless --yes. Never removes the primary worktree,
+# never removes a worktree with uncommitted changes.
+#
+# Usage:
+#   wt-prune [ROOT ...]        # scan these dirs for git repos (default: ~/code)
+#   wt-prune --yes             # actually remove MERGED worktrees
+#   wt-prune --yes --stale     # also remove STALE (no commits in --days N) worktrees
+#   wt-prune --days 30         # staleness threshold (default 30)
+#
+set -euo pipefail
+
+APPLY=0
+PRUNE_STALE=0
+DAYS=30
+ROOTS=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes|-y) APPLY=1 ;;
+    --stale)  PRUNE_STALE=1 ;;
+    --days)   DAYS="${2:?}"; shift ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    *) ROOTS+=("$1") ;;
+  esac
+  shift
+done
+[ ${#ROOTS[@]} -eq 0 ] && ROOTS=("$HOME/code")
+
+now=$(date +%s)
+threshold=$(( DAYS * 86400 ))
+removed=0 kept=0
+seen_repo=""   # portable dedup (bash 3.2 has no associative arrays)
+
+find_candidates() {
+  # a git worktree/repo = a dir with a .git entry (dir for primary, file for worktrees)
+  for root in "${ROOTS[@]}"; do
+    [ -d "$root" ] || continue
+    find "$root" -maxdepth 3 -name .git \( -type d -o -type f \) 2>/dev/null \
+      | sed 's|/\.git$||'
+  done
+}
+
+base_branch() {
+  local repo="$1" b
+  for b in dev main master; do
+    git -C "$repo" show-ref --verify --quiet "refs/heads/$b" && { echo "$b"; return; }
+  done
+  git -C "$repo" symbolic-ref --short HEAD 2>/dev/null || echo main
+}
+
+while IFS= read -r cand; do
+  # collapse every worktree of a repo to its primary path, process each repo once
+  primary=$(git -C "$cand" worktree list --porcelain 2>/dev/null \
+            | awk '/^worktree /{print $2; exit}') || continue
+  [ -z "$primary" ] && continue
+  case "$seen_repo" in *"|$primary|"*) continue ;; esac
+  seen_repo="$seen_repo|$primary|"
+  repo="$primary"
+
+  base=$(base_branch "$repo")
+  merged=" $(git -C "$repo" branch --merged "$base" --format='%(refname:short)' 2>/dev/null | tr '\n' ' ') "
+
+  while IFS=$'\t' read -r wt br; do
+    [ "$wt" = "$primary" ] && continue
+    short=${br#refs/heads/}
+    label="$(basename "$repo")/$(basename "$wt")"
+
+    if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+      echo "keep    $label — dirty"; kept=$((kept+1)); continue
+    fi
+
+    last=$(git -C "$wt" log -1 --format=%ct 2>/dev/null || echo "$now")
+    age=$(( (now - last) / 86400 ))
+    is_merged=0; case "$merged" in *" $short "*) is_merged=1 ;; esac
+    is_stale=0;  [ $(( now - last )) -gt "$threshold" ] && is_stale=1
+
+    reason=""
+    [ $is_merged -eq 1 ] && reason="merged→$base"
+    [ $is_stale -eq 1 ]  && reason="${reason:+$reason, }stale ${age}d"
+
+    if [ $is_merged -eq 1 ] || { [ $PRUNE_STALE -eq 1 ] && [ $is_stale -eq 1 ]; }; then
+      if [ $APPLY -eq 1 ]; then
+        git -C "$repo" worktree remove "$wt" && echo "REMOVED $label — $reason" && removed=$((removed+1))
+      else
+        echo "would remove $label — $reason"
+      fi
+    else
+      echo "keep    $label — ${reason:-active} (${age}d)"; kept=$((kept+1))
+    fi
+  done < <(git -C "$repo" worktree list --porcelain 2>/dev/null | awk '
+      /^worktree /{wt=$2} /^branch /{br=$2} /^detached/{br="(detached)"}
+      /^$/{ if (wt!="") print wt "\t" br; wt=""; br="" }
+      END{ if (wt!="") print wt "\t" br }')
+done < <(find_candidates)
+
+echo "---"
+if [ $APPLY -eq 1 ]; then echo "removed: $removed · kept: $kept"
+else echo "(dry-run — pass --yes to remove; add --stale to include stale) · kept: $kept"; fi

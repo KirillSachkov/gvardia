@@ -1,0 +1,17 @@
+# Go
+/gvardia
+/wt-prune
+*.exe
+*.test
+*.out
+/dist/
+/bin/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local config / scratch
+*.local
+/tmp/
