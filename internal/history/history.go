@@ -90,6 +90,42 @@ func (r Reader) SummaryFor(ctx context.Context, harness, sessionID, cwd string) 
 	return ""
 }
 
+// ReportFor returns a session's end-of-turn report — the last substantive
+// assistant message from its transcript — located from harness + id + cwd.
+// Empty when it can't be found.
+func (r Reader) ReportFor(ctx context.Context, harness, sessionID, cwd string) string {
+	if sessionID == "" {
+		return ""
+	}
+	switch harness {
+	case "claude":
+		if r.ClaudeRoot == "" {
+			return ""
+		}
+		return claudeReport(filepath.Join(r.ClaudeRoot, encodeCwd(cwd), sessionID+".jsonl"))
+	case "codex":
+		if r.CodexRoot == "" {
+			return ""
+		}
+		var report string
+		_ = filepath.WalkDir(r.CodexRoot, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+				return nil //nolint:nilerr
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if _, id := codexHead(path); id == sessionID {
+				report = codexReport(path)
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		return report
+	}
+	return ""
+}
+
 // cutoff is the oldest LastActivity to include, or the zero time for no cutoff.
 func (r Reader) cutoff(since time.Duration) time.Time {
 	if since <= 0 {

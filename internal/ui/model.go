@@ -143,21 +143,26 @@ func (m *Model) selectedWorktree() *model.Worktree {
 	return &m.worktreeList[i]
 }
 
-// currentDetail returns the detail header and diff-target worktree for the
-// current selection in either view. The header is "" when nothing is selected.
+// currentDetail returns the detail body (summary · task · report · artifacts)
+// and diff-target worktree for the current selection in either view. The body is
+// "" when nothing is selected.
 func (m *Model) currentDetail() (string, *model.Worktree) {
 	if m.worktreeView {
 		w := m.selectedWorktree()
 		if w == nil {
 			return "", nil
 		}
-		return worktreeHeader(*w), w
+		body := worktreeHeader(*w)
+		if s := m.selectedSession(); s != nil { // enriched WorkSession for this worktree
+			body += sessionExtra(*s)
+		}
+		return body, w
 	}
 	s := m.selectedSession()
 	if s == nil {
 		return "", nil
 	}
-	return detailHeader(*s), m.worktreeFor(s)
+	return sessionDetail(*s), m.worktreeFor(s)
 }
 
 // worktreeFor returns the worktree a session runs in (by path), or nil.

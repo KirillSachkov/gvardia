@@ -201,6 +201,43 @@ func worktreeHeader(w model.Worktree) string {
 	return w.Path + "\n" + dim.Render(meta)
 }
 
+// sessionDetail is the full detail body for a session: header plus its report
+// and artifacts.
+func sessionDetail(s model.Session) string {
+	return detailHeader(s) + sessionExtra(s)
+}
+
+// sessionExtra is the report + artifacts block appended below a detail header.
+func sessionExtra(s model.Session) string {
+	var b strings.Builder
+	if s.Report != "" {
+		b.WriteString("\n\n" + dim.Render("report") + "\n" + s.Report)
+	}
+	if len(s.Artifacts) > 0 {
+		b.WriteString("\n\n" + artifactsBlock(s.Artifacts))
+	}
+	return b.String()
+}
+
+// artifactsBlock renders a session's artifacts (changed files + report files),
+// capped so a large diff can't flood the detail pane.
+func artifactsBlock(arts []model.Artifact) string {
+	const cap = 20
+	var b strings.Builder
+	b.WriteString(dim.Render(fmt.Sprintf("artifacts (%d)", len(arts))))
+	shown := len(arts)
+	if shown > cap {
+		shown = cap
+	}
+	for i := 0; i < shown; i++ {
+		b.WriteString(fmt.Sprintf("\n  %-6s %s", arts[i].Status, arts[i].Path))
+	}
+	if len(arts) > cap {
+		b.WriteString(fmt.Sprintf("\n  …and %d more", len(arts)-cap))
+	}
+	return b.String()
+}
+
 // failureBanner summarizes skipped adapters for the status line.
 func failureBanner(failures []adapters.Failure) string {
 	if len(failures) == 0 {

@@ -14,6 +14,7 @@ func AssembleLive(ctx context.Context, runner Runner, projects []model.Project, 
 	projects = Join(projects, sessions)
 
 	statCache := make(map[string]model.ChangeStat)
+	filesCache := make(map[string][]model.Artifact)
 	for pi := range projects {
 		p := &projects[pi]
 		var work []model.Session
@@ -27,6 +28,11 @@ func AssembleLive(ctx context.Context, runner Runner, projects []model.Project, 
 				stat = ChangeStatFor(ctx, runner, wt.Path, wt.BaseBranch)
 				statCache[wt.Path] = stat
 			}
+			files, ok := filesCache[wt.Path]
+			if !ok {
+				files = ChangedFiles(ctx, runner, wt.Path, wt.BaseBranch)
+				filesCache[wt.Path] = files
+			}
 			wt.ChangeStat = stat
 			for _, s := range wt.Sessions {
 				s.Live = true
@@ -34,6 +40,7 @@ func AssembleLive(ctx context.Context, runner Runner, projects []model.Project, 
 				s.WorktreePath = wt.Path
 				s.Task = TaskFromBranch(wt.Branch)
 				s.ChangeStat = stat
+				s.Artifacts = files
 				work = append(work, s)
 			}
 		}

@@ -68,6 +68,7 @@ func (r Reader) claudeSessions(cwd string, limit int, since time.Duration) []mod
 			SessionID:    it.id,
 			Name:         shortID(it.id),
 			Summary:      claudeSummary(it.path),
+			Report:       claudeReport(it.path),
 			LastActivity: it.mtime,
 		})
 	}
@@ -115,6 +116,65 @@ func claudeSummary(path string) string {
 		return truncate(title, 100)
 	}
 	return truncate(firstUser, 100)
+}
+
+// claudeReport returns the last substantive assistant text message from a claude
+// transcript, cleaned and truncated for display.
+func claudeReport(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	var last string
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			var rec struct {
+				Type    string `json:"type"`
+				Message struct {
+					Content json.RawMessage `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(line, &rec) == nil && rec.Type == "assistant" {
+				if t := assistantText(rec.Message.Content); t != "" {
+					last = t
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return truncate(strings.TrimSpace(last), 500)
+}
+
+// assistantText joins the text parts of a claude assistant message (skipping
+// tool_use blocks), or returns a plain-string content as-is.
+func assistantText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) == nil {
+		var texts []string
+		for _, p := range parts {
+			if p.Type == "text" && strings.TrimSpace(p.Text) != "" {
+				texts = append(texts, strings.TrimSpace(p.Text))
+			}
+		}
+		return strings.Join(texts, "\n")
+	}
+	return ""
 }
 
 // userText pulls plain text out of a claude message content, which is either a

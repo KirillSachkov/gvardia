@@ -74,10 +74,56 @@ func (r Reader) codexSessions(ctx context.Context, cwd string, limit int, since 
 			SessionID:    it.id,
 			Name:         shortID(it.id),
 			Summary:      codexSummary(it.path),
+			Report:       codexReport(it.path),
 			LastActivity: it.mtime,
 		})
 	}
 	return out
+}
+
+// codexReport returns the last substantive assistant message from a codex
+// rollout, cleaned and truncated for display.
+func codexReport(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	var last string
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			var rec struct {
+				Type    string `json:"type"`
+				Payload struct {
+					Type    string `json:"type"`
+					Role    string `json:"role"`
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(line, &rec) == nil &&
+				rec.Type == "response_item" && rec.Payload.Type == "message" && rec.Payload.Role == "assistant" {
+				var texts []string
+				for _, c := range rec.Payload.Content {
+					if t := strings.TrimSpace(c.Text); t != "" {
+						texts = append(texts, t)
+					}
+				}
+				if j := strings.Join(texts, "\n"); j != "" {
+					last = j
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return truncate(strings.TrimSpace(last), 500)
 }
 
 // codexHead reads the session_meta header (first line) for cwd + session id.

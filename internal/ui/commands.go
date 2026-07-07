@@ -74,7 +74,9 @@ func collectFleet(cfg config.Config) tea.Cmd {
 		}
 		sessions, failures := adapters.CollectSessions(ctx, adapters.Enabled(cfg))
 		projects = collect.AssembleLive(ctx, collect.Git{}, projects, sessions)
-		attachSummaries(ctx, history.New(), projects)
+		hist := history.New()
+		attachSummaries(ctx, hist, projects)
+		attachReports(ctx, hist, projects)
 
 		taskList := tasks.Load(ctx, cfg.Brain)
 		tasks.LinkTasks(projects, taskList)
@@ -165,6 +167,19 @@ func attachSummaries(ctx context.Context, hist history.Reader, projects []model.
 			s := &projects[pi].WorkSessions[si]
 			if s.Summary == "" {
 				s.Summary = hist.SummaryFor(ctx, s.Harness, s.SessionID, s.Cwd)
+			}
+		}
+	}
+}
+
+// attachReports fills each live work-session's Report (its last assistant
+// message) from its transcript.
+func attachReports(ctx context.Context, hist history.Reader, projects []model.Project) {
+	for pi := range projects {
+		for si := range projects[pi].WorkSessions {
+			s := &projects[pi].WorkSessions[si]
+			if s.Report == "" {
+				s.Report = hist.ReportFor(ctx, s.Harness, s.SessionID, s.Cwd)
 			}
 		}
 	}

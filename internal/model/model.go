@@ -36,6 +36,14 @@ type ChangeStat struct {
 	Removed int `json:"removed"`
 }
 
+// Artifact is one thing a session produced: a changed file (Status is the git
+// name-status letter, e.g. "M"/"A"/"D") or an explicit report file (Status
+// "report").
+type Artifact struct {
+	Status string `json:"status"`
+	Path   string `json:"path"`
+}
+
 // Task is one card from the personal kanban (sachkov-os/tasks). Status is the
 // kanban column, taken from the containing directory (inbox/active/done).
 type Task struct {
@@ -73,5 +81,7 @@ type Session struct {
 	StartedAt    time.Time  `json:"startedAt"`
 	LastActivity time.Time  `json:"lastActivity,omitempty"`
 	Summary      string     `json:"summary,omitempty"`    // first user prompt from the transcript
+	Report       string     `json:"report,omitempty"`     // last substantive assistant message
 	ChangeStat   ChangeStat `json:"changeStat,omitempty"` // copied from the joined worktree
+	Artifacts    []Artifact `json:"artifacts,omitempty"`  // files changed + report files
 }
