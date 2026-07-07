@@ -1,8 +1,12 @@
 package ui
 
 import (
+	"fmt"
+
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
 // Init kicks off the first fleet collection and starts the refresh ticker.
@@ -72,16 +76,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	}
 
-	switch msg.String() {
+	switch normalizeKey(msg.String()) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "tab":
-		if m.focus == focusProjects {
-			m.focus = focusSessions
+		if m.level == levelProjects {
+			m.level = levelWork
 		} else {
-			m.focus = focusProjects
+			m.level = levelProjects
 		}
-		return m, nil
+		return m, m.diffForSelection()
 	case "/":
 		m.filtering = true
 		return m, m.filter.Focus()
@@ -90,6 +94,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "h":
 		return m.toggleHistory()
 	case "enter":
+		return m.drillDown()
+	case "esc", "backspace":
+		return m.drillUp()
+	case "d":
 		if w := m.worktreeFor(m.selectedSession()); w != nil {
 			return m, enterDiff(*w, m.cfg)
 		}
@@ -112,10 +120,50 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.openNewAgentPrompt()
 	}
 
-	if m.focus == focusProjects {
+	switch m.level {
+	case levelProjects:
 		return m.navigateProjects(msg)
+	case levelWork:
+		return m.navigateSessions(msg)
+	default: // levelDetail
+		return m.navigateDiff(msg)
 	}
-	return m.navigateSessions(msg)
+}
+
+// drillDown moves one navigation level deeper (projects → work → detail),
+// refreshing the detail pane. It is a no-op at the deepest level or when the
+// work level has no session to open.
+func (m Model) drillDown() (tea.Model, tea.Cmd) {
+	switch m.level {
+	case levelProjects:
+		m.level = levelWork
+		return m, m.diffForSelection()
+	case levelWork:
+		if m.selectedSession() == nil {
+			return m, nil
+		}
+		m.level = levelDetail
+		return m, m.diffForSelection()
+	}
+	return m, nil
+}
+
+// drillUp climbs one navigation level back toward the projects list.
+func (m Model) drillUp() (tea.Model, tea.Cmd) {
+	switch m.level {
+	case levelDetail:
+		m.level = levelWork
+	case levelWork:
+		m.level = levelProjects
+	}
+	return m, nil
+}
+
+// navigateDiff scrolls the detail/diff viewport at the deepest level.
+func (m Model) navigateDiff(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.diff, cmd = m.diff.Update(msg)
+	return m, cmd
 }
 
 // handleFilterKey feeds keys to the filter input, applying it live.
@@ -201,20 +249,33 @@ func (m *Model) refilter() {
 }
 
 // diffForSelection shows the selected session's detail header immediately and
-// returns a command to load its worktree diff (nil if nothing/no worktree).
+// returns a command to load its worktree diff. The detail pane is never left
+// blank: with no session it explains why and how to populate the view.
 func (m *Model) diffForSelection() tea.Cmd {
 	s := m.selectedSession()
 	if s == nil {
-		m.diff.SetContent("")
+		m.diff.SetContent(emptyDetail(m.selectedProject()))
+		m.diff.GotoTop()
 		return nil
 	}
 	m.diff.SetContent(detailHeader(*s) + "\n\nloading diff…")
 	m.diff.GotoTop()
 	w := m.worktreeFor(s)
 	if w == nil {
-		return nil // ended session whose worktree is gone
+		// Ended session whose worktree is gone: show the header, no diff.
+		m.diff.SetContent(detailHeader(*s) + "\n\n" + dim.Render("worktree gone — history only"))
+		return nil
 	}
 	return diffStat(w.Path, w.BaseBranch)
+}
+
+// emptyDetail is the placeholder shown when no session is selected, so the
+// detail pane never renders blank.
+func emptyDetail(p *model.Project) string {
+	if p == nil {
+		return dim.Render("no project selected")
+	}
+	return dim.Render(fmt.Sprintf("%s — no active sessions\n\npress h for history · n for new agent", p.Name))
 }
 
 // layout sizes the panes to the current terminal dimensions, using the shared

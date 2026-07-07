@@ -14,12 +14,16 @@ import (
 	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
-// focusArea is the pane that currently receives navigation keys.
-type focusArea int
+// navLevel is how deep the cockpit is drilled in: projects (L0), the selected
+// project's work sessions (L1), or a single session's detail (L2). enter drills
+// down a level, esc/backspace climbs back up. The active level also decides which
+// pane receives navigation keys and shows the focus border.
+type navLevel int
 
 const (
-	focusProjects focusArea = iota
-	focusSessions
+	levelProjects navLevel = iota
+	levelWork
+	levelDetail
 )
 
 // Model holds the cockpit state. It stores data and selection only; everything
@@ -34,7 +38,7 @@ type Model struct {
 	diff     viewport.Model
 	filter   textinput.Model
 
-	focus     focusArea
+	level     navLevel
 	filtering bool   // true while the filter textinput is capturing input
 	loading   bool   // true until the first fleet result arrives
 	banner    string // last adapter/collector error, shown in the footer area
@@ -70,7 +74,7 @@ func New(cfg config.Config) Model {
 		sessions:         sessions,
 		diff:             viewport.New(),
 		filter:           filter,
-		focus:            focusProjects,
+		level:            levelProjects,
 		loading:          true,
 		historyByProject: make(map[string][]model.Session),
 	}

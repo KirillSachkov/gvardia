@@ -24,7 +24,7 @@ type newAgentPrompt struct {
 // handleConfirmKey resolves a pending confirmation.
 func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	action := m.confirm.action
-	switch msg.String() {
+	switch normalizeKey(msg.String()) {
 	case "y", "Y", "enter":
 		m.confirm = nil
 		return m, action

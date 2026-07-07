@@ -70,9 +70,9 @@ func (m Model) render() string {
 			lipgloss.Center, lipgloss.Center, "collecting fleet…")
 	}
 
-	left := pane(m.focus == focusProjects, m.projList.View())
-	sess := pane(m.focus == focusSessions, m.sessions.View())
-	diff := pane(false, m.diff.View())
+	left := pane(m.level == levelProjects, m.projList.View())
+	sess := pane(m.level == levelWork, m.sessions.View())
+	diff := pane(m.level == levelDetail, m.diff.View())
 	right := lipgloss.JoinVertical(lipgloss.Left, sess, diff)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
@@ -110,7 +110,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · tab · enter diff · h history · a attach · r resume · n new · k kill · g gc · / filter · R · q"
+	keys := "↑↓ nav · enter drill · esc back · d diff · h history · a attach · r resume · n new · k kill · g gc · / filter · R · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"

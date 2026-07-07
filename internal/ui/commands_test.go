@@ -4,17 +4,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/KirillSachkov/gvardia/internal/config"
 	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
-func TestEnterIssuesExec(t *testing.T) {
+func TestDDiffIssuesExec(t *testing.T) {
 	m := ready(t)
-	_, cmd := step(m, keyPress(tea.KeyEnter))
+	_, cmd := step(m, keyText("d"))
 	if cmd == nil {
-		t.Fatal("enter with a selection should issue an exec command")
+		t.Fatal("d with a selection should issue a diff exec command")
 	}
 }
 
