@@ -229,8 +229,47 @@ func sessionExec(s model.Session, attach bool) *exec.Cmd {
 // attachSession hands the terminal to the selected session (tmux-attach aware).
 func attachSession(s model.Session) tea.Cmd { return execOrBanner(sessionExec(s, true)) }
 
-// resumeSession resumes the selected session's harness (claude/codex).
-func resumeSession(s model.Session) tea.Cmd { return execOrBanner(sessionExec(s, false)) }
+// handoffCommand builds a shell command that resumes the session in another
+// terminal (cd into its worktree, then the harness resume). Returns "" when the
+// session has no resumable form. Pure and testable.
+func handoffCommand(s model.Session) string {
+	dir := s.WorktreePath
+	if dir == "" {
+		dir = s.Cwd
+	}
+	var resume string
+	switch s.Harness {
+	case "claude":
+		if s.SessionID != "" {
+			resume = "claude --resume " + s.SessionID
+		}
+	case "codex":
+		if s.SessionID != "" {
+			resume = "codex resume " + s.SessionID
+		} else {
+			resume = "codex resume --last"
+		}
+	case "tmux":
+		if s.SessionID != "" {
+			resume = "tmux attach -t " + s.SessionID
+		}
+	}
+	if resume == "" {
+		return ""
+	}
+	if dir != "" {
+		return fmt.Sprintf("cd %s && %s", shellQuote(dir), resume)
+	}
+	return resume
+}
+
+// shellQuote single-quotes s for a POSIX shell, escaping embedded single quotes.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
 
 // execOrBanner runs cmd interactively, or reports a banner if there is no command.
 func execOrBanner(cmd *exec.Cmd) tea.Cmd {

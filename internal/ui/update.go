@@ -75,6 +75,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKey routes a key press. Modals (confirm, new-agent) take priority, then
 // the filter input, then global keys and navigation.
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.toast = "" // any key dismisses the last transient toast
 	switch {
 	case m.confirm != nil:
 		return m.handleConfirmKey(msg)
@@ -125,10 +126,18 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "r":
-		if s := m.selectedSession(); s != nil {
-			return m, resumeSession(*s)
+		s := m.selectedSession()
+		if s == nil {
+			return m, nil
 		}
-		return m, nil
+		cmd := handoffCommand(*s)
+		if cmd == "" {
+			m.banner = "no resumable command for this session"
+			return m, nil
+		}
+		m.banner = ""
+		m.toast = "copied resume command — paste in a terminal"
+		return m, tea.SetClipboard(cmd)
 	case "k":
 		return m.confirmKill()
 	case "g":

@@ -107,6 +107,8 @@ func (m Model) statusLine() string {
 		return dim.Render(label) + m.pathPrompt.input.View()
 	case m.filtering:
 		return dim.Render("filter: ") + m.filter.Value() + dim.Render("▏")
+	case m.toast != "":
+		return dim.Render(truncate("✓ "+m.toast, m.width))
 	case m.banner != "":
 		return warn.Render(truncate("⚠ "+m.banner, m.width))
 	case m.showTasks:
@@ -130,7 +132,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · enter drill · esc back · d diff · w worktrees · t tasks · h history · a attach · r resume · n new · A add · X untrack · C create · k kill · g gc · / filter · R · q"
+	keys := "↑↓ nav · enter drill · esc back · d diff · w worktrees · t tasks · h history · a attach · r handoff · n new · A add · X untrack · C create · k kill · g gc · / filter · R · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"

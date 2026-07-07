@@ -47,6 +47,7 @@ type Model struct {
 	filtering bool   // true while the filter textinput is capturing input
 	loading   bool   // true until the first fleet result arrives
 	banner    string // last adapter/collector error, shown in the footer area
+	toast     string // transient success note (e.g. clipboard copy), cleared on next key
 
 	showHistory      bool                       // include ended sessions in the work pane
 	historyByProject map[string][]model.Session // lazily loaded, keyed by project path
