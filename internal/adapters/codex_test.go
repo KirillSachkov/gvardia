@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,60 +11,59 @@ import (
 	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
-func TestCodexSessionsNewestPerCwd(t *testing.T) {
+type fakeLister struct {
+	cwds map[string]int
+	err  error
+}
+
+func (f fakeLister) LiveCwds(context.Context) (map[string]int, error) { return f.cwds, f.err }
+
+func TestCodexSessionsAreProcessBacked(t *testing.T) {
 	root := t.TempDir()
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 
-	// Two sessions for /a (keep the newer), one for /b. Nested dirs test recursion.
+	// Files for /a (newer wins) and /b — but only /a has a running process.
 	writeCodexSession(t, root, "2026/06/30/a-old.jsonl", "/a", "a-old-1111", now.Add(-time.Hour))
 	writeCodexSession(t, root, "2026/07/01/a-new.jsonl", "/a", "a-new-2222", now.Add(-5*time.Second))
 	writeCodexSession(t, root, "2026/07/01/b.jsonl", "/b", "b-3333", now.Add(-time.Hour))
-	// A non-session file that must be ignored.
-	writeFileT(t, filepath.Join(root, "notes.txt"), "ignore me")
 
 	c := Codex{
 		Root:      root,
 		Staleness: 15 * time.Second,
 		now:       func() time.Time { return now },
+		lister:    fakeLister{cwds: map[string]int{"/a": 111}}, // only /a is running
 	}
 	sessions, err := c.Sessions(context.Background())
 	if err != nil {
 		t.Fatalf("Sessions: %v", err)
 	}
-	if len(sessions) != 2 {
-		t.Fatalf("got %d sessions, want 2 (newest per cwd): %+v", len(sessions), sessions)
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 (only process-backed /a): %+v", len(sessions), sessions)
 	}
-
-	byCwd := map[string]model.Session{}
-	for _, s := range sessions {
-		byCwd[s.Cwd] = s
+	s := sessions[0]
+	if s.Cwd != "/a" || !s.Live || s.PID != 111 {
+		t.Errorf("session = %+v, want /a live pid 111", s)
 	}
-	a, ok := byCwd["/a"]
-	if !ok {
-		t.Fatal("no session for /a")
+	if s.SessionID != "a-new-2222" { // newest file for /a
+		t.Errorf("SessionID = %q, want a-new-2222", s.SessionID)
 	}
-	if a.Name != "a-new-22" { // shortID keeps first 8 chars of "a-new-2222"
-		t.Errorf("/a session name = %q, want newest a-new-22", a.Name)
-	}
-	if a.Status != model.StatusBusy {
-		t.Errorf("/a status = %q, want busy (fresh mtime)", a.Status)
-	}
-	if byCwd["/b"].Status != model.StatusIdle {
-		t.Errorf("/b status = %q, want idle (stale mtime)", byCwd["/b"].Status)
-	}
-	if a.Harness != "codex" {
-		t.Errorf("Harness = %q, want codex", a.Harness)
+	if s.Status != model.StatusBusy { // fresh mtime
+		t.Errorf("Status = %q, want busy", s.Status)
 	}
 }
 
-func TestCodexMissingRootIsNotAnError(t *testing.T) {
-	c := Codex{Root: filepath.Join(t.TempDir(), "nope")}
+func TestCodexNoLiveProcessNoSessions(t *testing.T) {
+	c := Codex{lister: fakeLister{cwds: map[string]int{}}}
 	sessions, err := c.Sessions(context.Background())
-	if err != nil {
-		t.Fatalf("Sessions on missing root: %v, want nil", err)
+	if err != nil || sessions != nil {
+		t.Fatalf("Sessions = (%+v, %v), want (nil, nil)", sessions, err)
 	}
-	if sessions != nil {
-		t.Errorf("sessions = %+v, want nil", sessions)
+}
+
+func TestCodexListerErrorPropagates(t *testing.T) {
+	c := Codex{lister: fakeLister{err: errors.New("pgrep boom")}}
+	if _, err := c.Sessions(context.Background()); err == nil {
+		t.Fatal("Sessions error = nil, want the lister error to surface (adapter skipped)")
 	}
 }
 
