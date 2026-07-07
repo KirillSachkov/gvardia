@@ -27,16 +27,21 @@ viewing, or agent management. It aggregates state and shells out to proven tools
 ├────────────────────────┴──────────────────────────────────────────────────────┤
 │ DETAIL · edu-85                                                                 │
 │ Finish OpenIddict snake_case + review fixes for s3                             │
-│ busy claude · #675 · feat/675-s3 · 14 files +90 -12 · 2m         [enter] lazygit│
+│ busy claude · #675 · feat/675-s3 · 14 files +90 -12 · 2m                        │
+│ report  Done: switched the token claims to snake_case and green-lit the tests.  │
+│ artifacts (3)  M src/Auth.cs · A tests/AuthTests.cs · report .gvardia/reports/… │
 ├────────────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ nav · tab · enter diff · h history · a attach · n new · k kill · g gc · q     │
+│ ↑↓ nav · enter drill · esc back · d diff · w worktrees · t tasks · h history …  │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 Each row is one agent session: live agents first (honest process-backed status),
-then recent **ended** sessions when you press `h`. The summary is the agent's own
-session title (or first prompt), pulled from its transcript. The task is inferred
-from the branch name.
+then recent **ended** sessions when you press `h`. `enter` drills a level deeper
+(projects → sessions → detail), `esc` climbs back. The summary is the agent's own
+session title, the **report** is its last message, and **artifacts** are the files
+it changed — all pulled from the transcript and `git`. The task is linked from your
+kanban (or inferred from the branch). Press `w` for the worktree view, `t` for the
+kanban, `d` for `lazygit`. Keybinds work under a Russian (ЙЦУКЕН) layout too.
 
 ## Install
 
@@ -62,6 +67,7 @@ Optional but recommended companions (gvardia degrades gracefully without them):
 gvardia                  # launch the cockpit
 gvardia agents --json    # headless: the whole fleet as JSON (scriptable)
 gvardia projects --json  # headless: projects + worktrees, no agent join
+gvardia tasks            # headless: the kanban, grouped by column
 wt-prune ~/code          # dry-run: list merged / stale worktrees
 wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 ```
@@ -70,21 +76,32 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 
 | Key        | Action                                                         |
 |------------|----------------------------------------------------------------|
-| `↑↓` `j k` | navigate the focused pane                                      |
-| `tab`      | switch focus between projects and sessions                     |
-| `enter`    | open the selected session's worktree in `lazygit` (fallback: `git diff`) |
+| `↑↓` `j k` | navigate the focused level (arrows work on any keyboard layout)|
+| `enter`    | drill down a level (projects → sessions → detail)              |
+| `esc` `⌫`  | climb back up a level                                          |
+| `tab`      | jump between the projects and sessions levels                  |
+| `d`        | open the selection's worktree in `lazygit` (fallback: `git diff`) |
+| `w`        | toggle the worktree view (every worktree + which agent runs there) |
+| `t`        | open the kanban browser (`p` scope to project, `/` filter)     |
 | `h`        | toggle recent ended sessions (history) in the work pane        |
-| `a`        | attach: `tmux attach`, else resume the session's harness       |
-| `r`        | resume the session (`claude --resume`, `codex resume`)         |
+| `a`        | attach in place: `tmux attach`, else resume the harness        |
+| `r`        | hand off: copy `cd <wt> && <harness> resume` to the clipboard  |
 | `n`        | new agent: pick a harness, name it, spawn it                   |
+| `A`        | track an existing repo as a project (curation)                 |
+| `C`        | create a new project (`git init`) and track it                 |
+| `X`        | untrack the selected project (never deletes the repo)          |
 | `k`        | kill the live session process (SIGTERM, confirms first)        |
 | `g`        | gc merged/stale worktrees via `wt-prune` (confirms first)      |
-| `/`        | filter projects by name or branch                              |
+| `/`        | filter projects (or tasks) by name or branch                   |
 | `R`        | force refresh now                                              |
 | `q`        | quit                                                           |
 
 Status glyphs: `●` busy · `○` idle · `◍` codex · `✓` ended (history) · `✖` failed.
 The `Δ` column is the session's diff vs its base branch (`+added/-removed`).
+
+**Curation.** By default gvardia scans `roots` for repos. Press `A`/`C` to track
+specific projects instead; the tracked list lives in
+`~/.config/gvardia/projects.toml` and, once non-empty, replaces the scan.
 
 ## Configuration
 
@@ -92,7 +109,8 @@ The `Δ` column is the session's diff vs its base branch (`+added/-removed`).
 key is optional; the defaults are shown below.
 
 ```toml
-roots = ["~/code"]                 # dirs scanned (shallow) for git repos
+roots = ["~/code"]                 # dirs scanned when no projects are curated
+brain = "~/Work/sachkov-os"        # kanban source: tasks/{inbox,active,done}/*.md
 refresh_interval = "5s"            # how often the cockpit re-collects
 adapters = ["claude", "codex", "tmux"]
 
@@ -103,6 +121,9 @@ default = "auto"                   # auto = dev if it exists, else main
 [commands]
 lazygit = "lazygit"                # override the lazygit binary/path
 ```
+
+The curated project list is managed by the TUI (`A`/`C`/`X`) in a separate file,
+`~/.config/gvardia/projects.toml`, so it never clobbers your hand-written config.
 
 ## Degrades gracefully
 
@@ -120,6 +141,7 @@ Nothing here is a hard dependency beyond `git`:
 - `gvardia agents --json` — headless fleet dump: projects, worktrees, and the
   agent sessions joined to them.
 - `gvardia projects --json` — the git-only view (worktrees + status, no agents).
+- `gvardia tasks` — dump the kanban (from `brain`) grouped by column.
 - `wt-prune [roots…]` — worktree GC across your roots. Dry-run by default;
   `--yes` removes merged worktrees, `--stale` also removes stale ones, `--days N`
   sets the staleness threshold. Never touches a primary or dirty worktree.
@@ -132,8 +154,10 @@ cmd/wt-prune/      worktree GC CLI
 internal/config/   ~/.config/gvardia/config.toml loader
 internal/collect/  worktree + git-status collectors (concurrent)
 internal/adapters/ pluggable per-harness status: claude, codex, tmux, …
-internal/model/    Project / Worktree / Session domain types
-internal/ui/       Bubble Tea model/update/view (3-pane cockpit)
+internal/model/    Project / Worktree / Session / Task domain types
+internal/history/  ended-session summaries + reports from agent transcripts
+internal/tasks/    kanban reader (brain tasks/{inbox,active,done}/*.md)
+internal/ui/       Bubble Tea model/update/view (cockpit + tasks browser)
 internal/prune/    worktree classification (merged/stale/active)
 docs/              DESIGN.md · PLAN.md · ROADMAP.md · ADAPTERS.md
 ```
