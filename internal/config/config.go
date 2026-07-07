@@ -84,6 +84,11 @@ func DefaultPath() string {
 	return expandHome(filepath.Join("~", ".config", "gvardia", "config.toml"))
 }
 
+// ExpandPath expands a leading "~" in p to the user's home directory. It is the
+// exported form of the config's own path handling, for callers that take paths
+// (e.g. roots) on the command line.
+func ExpandPath(p string) string { return expandHome(p) }
+
 // finalize applies post-decode normalization: expand "~" in every root.
 func finalize(cfg Config) Config {
 	for i, r := range cfg.Roots {
