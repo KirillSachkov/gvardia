@@ -15,6 +15,7 @@ import (
 	"github.com/KirillSachkov/gvardia/internal/adapters"
 	"github.com/KirillSachkov/gvardia/internal/collect"
 	"github.com/KirillSachkov/gvardia/internal/config"
+	"github.com/KirillSachkov/gvardia/internal/history"
 	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
@@ -29,6 +30,12 @@ type errMsg struct{ err error }
 
 // tickMsg is the periodic refresh trigger.
 type tickMsg time.Time
+
+// historyMsg carries lazily-loaded past sessions for a project.
+type historyMsg struct {
+	projectPath string
+	sessions    []model.Session
+}
 
 // diffMsg carries the diff stat for a worktree.
 type diffMsg struct {
@@ -48,8 +55,31 @@ func collectFleet(cfg config.Config) tea.Cmd {
 			return errMsg{err}
 		}
 		sessions, failures := adapters.CollectSessions(ctx, adapters.Enabled(cfg))
-		projects = collect.Join(projects, sessions)
+		projects = collect.AssembleLive(ctx, collect.Git{}, projects, sessions)
+		attachSummaries(ctx, history.New(), projects)
 		return fleetMsg{projects: projects, failures: failures}
+	}
+}
+
+// attachSummaries fills each live work-session's Summary from its transcript.
+func attachSummaries(ctx context.Context, hist history.Reader, projects []model.Project) {
+	for pi := range projects {
+		for si := range projects[pi].WorkSessions {
+			s := &projects[pi].WorkSessions[si]
+			if s.Summary == "" {
+				s.Summary = hist.SummaryFor(ctx, s.Harness, s.SessionID, s.Cwd)
+			}
+		}
+	}
+}
+
+// loadHistory fetches recent past sessions for a project's primary cwd.
+func loadHistory(projectPath string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		sessions := history.New().Recent(ctx, projectPath, history.Options{Limit: 8, Since: 14 * 24 * time.Hour})
+		return historyMsg{projectPath: projectPath, sessions: sessions}
 	}
 }
 
@@ -68,18 +98,18 @@ type spawnMsg struct {
 	dir     string
 }
 
-// sessionExec builds the attach/resume command for a worktree's lead session.
-// attach enables tmux attach for tmux sessions; without it, tmux sessions have
-// no resume command. Returns nil when there is nothing to attach to.
-func sessionExec(w model.Worktree, attach bool) *exec.Cmd {
-	if len(w.Sessions) == 0 {
-		return nil
+// sessionExec builds the attach/resume command for a session. attach enables
+// tmux attach for tmux sessions; without it tmux has no resume command. Returns
+// nil when there is nothing to run.
+func sessionExec(s model.Session, attach bool) *exec.Cmd {
+	dir := s.WorktreePath
+	if dir == "" {
+		dir = s.Cwd
 	}
-	s := w.Sessions[0]
 	switch s.Harness {
 	case "claude":
 		cmd := exec.Command("claude", "--resume", s.SessionID)
-		cmd.Dir = w.Path
+		cmd.Dir = dir
 		return cmd
 	case "codex":
 		args := []string{"resume", "--last"}
@@ -87,7 +117,7 @@ func sessionExec(w model.Worktree, attach bool) *exec.Cmd {
 			args = []string{"resume", s.SessionID}
 		}
 		cmd := exec.Command("codex", args...)
-		cmd.Dir = w.Path
+		cmd.Dir = dir
 		return cmd
 	case "tmux":
 		if attach && s.SessionID != "" {
@@ -100,10 +130,10 @@ func sessionExec(w model.Worktree, attach bool) *exec.Cmd {
 }
 
 // attachSession hands the terminal to the selected session (tmux-attach aware).
-func attachSession(w model.Worktree) tea.Cmd { return execOrBanner(sessionExec(w, true)) }
+func attachSession(s model.Session) tea.Cmd { return execOrBanner(sessionExec(s, true)) }
 
 // resumeSession resumes the selected session's harness (claude/codex).
-func resumeSession(w model.Worktree) tea.Cmd { return execOrBanner(sessionExec(w, false)) }
+func resumeSession(s model.Session) tea.Cmd { return execOrBanner(sessionExec(s, false)) }
 
 // execOrBanner runs cmd interactively, or reports a banner if there is no command.
 func execOrBanner(cmd *exec.Cmd) tea.Cmd {

@@ -11,11 +11,7 @@ import (
 )
 
 func TestSessionExec(t *testing.T) {
-	wt := func(s model.Session) model.Worktree {
-		return model.Worktree{Path: "/w", Sessions: []model.Session{s}}
-	}
-
-	claude := sessionExec(wt(model.Session{Harness: "claude", SessionID: "abc"}), true)
+	claude := sessionExec(model.Session{Harness: "claude", SessionID: "abc", WorktreePath: "/w"}, true)
 	if claude == nil || !hasArgs(claude.Args, "--resume", "abc") {
 		t.Errorf("claude exec args = %v", args(claude))
 	}
@@ -23,36 +19,37 @@ func TestSessionExec(t *testing.T) {
 		t.Errorf("claude Dir = %q, want /w", claude.Dir)
 	}
 
-	codex := sessionExec(wt(model.Session{Harness: "codex", SessionID: "xyz"}), true)
+	codex := sessionExec(model.Session{Harness: "codex", SessionID: "xyz", WorktreePath: "/w"}, true)
 	if codex == nil || !hasArgs(codex.Args, "resume", "xyz") {
 		t.Errorf("codex exec args = %v", args(codex))
 	}
-	codexLast := sessionExec(wt(model.Session{Harness: "codex"}), true)
+	codexLast := sessionExec(model.Session{Harness: "codex", WorktreePath: "/w"}, true)
 	if codexLast == nil || !hasArgs(codexLast.Args, "resume", "--last") {
 		t.Errorf("codex without id should use --last, got %v", args(codexLast))
 	}
 
-	tm := sessionExec(wt(model.Session{Harness: "tmux", SessionID: "work"}), true)
+	tm := sessionExec(model.Session{Harness: "tmux", SessionID: "work"}, true)
 	if tm == nil || !hasArgs(tm.Args, "attach", "-t", "work") {
 		t.Errorf("tmux attach args = %v", args(tm))
 	}
-	if sessionExec(wt(model.Session{Harness: "tmux", SessionID: "work"}), false) != nil {
+	if sessionExec(model.Session{Harness: "tmux", SessionID: "work"}, false) != nil {
 		t.Error("tmux resume (attach=false) should be nil")
 	}
-	if sessionExec(model.Worktree{Path: "/w"}, true) != nil {
-		t.Error("no session → nil command")
+	if sessionExec(model.Session{Harness: "unknown"}, true) != nil {
+		t.Error("unknown harness → nil command")
 	}
 }
 
 func TestKillConfirmFlow(t *testing.T) {
 	m := ready(t)
-	// alpha's worktree has no session → 'k' should banner, not open a confirm.
+	// alpha's selected session has no PID → 'k' banners, no confirm.
 	m, _ = step(m, keyText("k"))
 	if m.confirm != nil {
-		t.Fatal("k with no session should not open a confirm")
+		t.Fatal("k with a PID-less session should not open a confirm")
 	}
 
-	m.projects[0].Worktrees[0].Sessions = []model.Session{{Harness: "claude", Name: "a1", PID: 4242}}
+	// Give the selected session a PID, then 'k' → confirm.
+	m.projects[0].WorkSessions[0].PID = 4242
 	m.rebuildSessions()
 	m, _ = step(m, keyText("k"))
 	if m.confirm == nil {
@@ -63,11 +60,8 @@ func TestKillConfirmFlow(t *testing.T) {
 		t.Error("n should cancel the confirm with no action")
 	}
 	m3, cmd := step(m, keyText("y"))
-	if m3.confirm != nil {
-		t.Error("y should clear the confirm")
-	}
-	if cmd == nil {
-		t.Error("y should return the kill action command")
+	if m3.confirm != nil || cmd == nil {
+		t.Error("y should clear the confirm and return the kill action")
 	}
 }
 
@@ -99,11 +93,8 @@ func TestNewAgentPrompt(t *testing.T) {
 		t.Errorf("tab should switch harness to codex, got %q", m.prompt.harness)
 	}
 	m2, cmd := step(m, keyPress(tea.KeyEnter))
-	if m2.prompt != nil {
-		t.Error("enter should close the prompt")
-	}
-	if cmd == nil {
-		t.Error("enter should return a newAgent command")
+	if m2.prompt != nil || cmd == nil {
+		t.Error("enter should close the prompt and return a newAgent command")
 	}
 	if m3, _ := step(m, keyPress(tea.KeyEscape)); m3.prompt != nil {
 		t.Error("esc should cancel the prompt")

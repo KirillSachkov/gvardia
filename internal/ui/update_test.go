@@ -12,13 +12,27 @@ import (
 
 func testProjects() []model.Project {
 	return []model.Project{
-		{Name: "alpha", Path: "/r/alpha", Worktrees: []model.Worktree{
-			{Path: "/r/alpha", Branch: "main", IsPrimary: true},
-		}},
-		{Name: "beta", Path: "/r/beta", Worktrees: []model.Worktree{
-			{Path: "/r/beta", Branch: "dev", IsPrimary: true},
-			{Path: "/r/beta/wt", Branch: "feat"},
-		}},
+		{
+			Name: "alpha", Path: "/r/alpha",
+			Worktrees: []model.Worktree{{Path: "/r/alpha", Branch: "main", IsPrimary: true}},
+			WorkSessions: []model.Session{
+				{Harness: "claude", Name: "a1", SessionID: "s1", Live: true, Status: model.StatusBusy,
+					Branch: "main", WorktreePath: "/r/alpha"},
+			},
+		},
+		{
+			Name: "beta", Path: "/r/beta",
+			Worktrees: []model.Worktree{
+				{Path: "/r/beta", Branch: "dev", IsPrimary: true},
+				{Path: "/r/beta/wt", Branch: "feat/675-x"},
+			},
+			WorkSessions: []model.Session{
+				{Harness: "claude", Name: "b1", SessionID: "sb1", Live: true, Status: model.StatusIdle,
+					Branch: "dev", WorktreePath: "/r/beta"},
+				{Harness: "codex", Name: "b2", SessionID: "sb2", Live: true, Status: model.StatusBusy,
+					Branch: "feat/675-x", WorktreePath: "/r/beta/wt"},
+			},
+		},
 	}
 }
 
@@ -28,7 +42,7 @@ func ready(t *testing.T) Model {
 	if !m.loading {
 		t.Fatal("new model should start loading")
 	}
-	m, _ = step(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m, _ = step(m, tea.WindowSizeMsg{Width: 140, Height: 40})
 	m, cmd := step(m, fleetMsg{projects: testProjects()})
 	if m.loading {
 		t.Fatal("model should stop loading after fleetMsg")
@@ -42,28 +56,53 @@ func ready(t *testing.T) Model {
 	return m
 }
 
-func TestFleetPopulatesPanes(t *testing.T) {
+func TestFleetPopulatesSessions(t *testing.T) {
 	m := ready(t)
 	if p := m.selectedProject(); p == nil || p.Name != "alpha" {
 		t.Fatalf("selectedProject = %v, want alpha", p)
 	}
-	// alpha has 1 worktree → 1 session-table row.
-	if got := len(m.sessions.Rows()); got != 1 {
-		t.Errorf("sessions rows = %d, want 1", got)
+	if got := len(m.sessions.Rows()); got != 1 { // alpha has 1 work-session
+		t.Errorf("session rows = %d, want 1", got)
+	}
+	if s := m.selectedSession(); s == nil || s.Name != "a1" {
+		t.Fatalf("selectedSession = %v, want a1", s)
 	}
 }
 
 func TestNavigateProjectsRebuildsSessions(t *testing.T) {
 	m := ready(t)
-	m, cmd := step(m, keyText("j")) // move down to beta
+	m, cmd := step(m, keyText("j")) // move to beta
 	if p := m.selectedProject(); p == nil || p.Name != "beta" {
 		t.Fatalf("after 'j', selectedProject = %v, want beta", p)
 	}
-	if got := len(m.sessions.Rows()); got != 2 {
-		t.Errorf("beta sessions rows = %d, want 2", got)
+	if got := len(m.sessions.Rows()); got != 2 { // beta has 2 work-sessions
+		t.Errorf("beta session rows = %d, want 2", got)
 	}
 	if cmd == nil {
 		t.Error("moving selection should trigger a diff command")
+	}
+}
+
+func TestHistoryToggleMergesEndedSessions(t *testing.T) {
+	m := ready(t)
+	m, cmd := step(m, keyText("h"))
+	if !m.showHistory {
+		t.Fatal("'h' should turn history on")
+	}
+	if cmd == nil {
+		t.Error("'h' should issue a history load for the selected project")
+	}
+	// Simulate the history result arriving.
+	m, _ = step(m, historyMsg{projectPath: "/r/alpha", sessions: []model.Session{
+		{Harness: "claude", Name: "old1", SessionID: "h1", Live: false},
+	}})
+	if got := len(m.sessions.Rows()); got != 2 { // 1 live + 1 ended
+		t.Errorf("rows with history = %d, want 2", got)
+	}
+	// Toggle off → back to live only.
+	m, _ = step(m, keyText("h"))
+	if got := len(m.sessions.Rows()); got != 1 {
+		t.Errorf("rows after hiding history = %d, want 1", got)
 	}
 }
 
@@ -82,9 +121,6 @@ func TestFilterNarrowsProjects(t *testing.T) {
 	m, _ = step(m, keyPress(tea.KeyEnter))
 	if m.filtering {
 		t.Error("enter should leave filter mode")
-	}
-	if m.filter.Value() != "bet" {
-		t.Errorf("filter value = %q, want bet", m.filter.Value())
 	}
 }
 

@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/table"
 
@@ -41,62 +42,48 @@ func (p projectItem) matches(q string) bool {
 	return false
 }
 
-// sessionColumns returns the sessions-table columns sized to the given width.
+// sessionColumns returns the work-pane columns sized to the given width; branch
+// absorbs the slack.
 func sessionColumns(width int) []table.Column {
-	// Fixed glyph/harness columns; branch/name take the remainder.
-	rest := width - 2 - 8 - 12
-	if rest < 10 {
-		rest = 10
+	const state, harness, agent, task, delta, last = 2, 7, 16, 6, 9, 5
+	branch := width - (state + harness + agent + task + delta + last)
+	if branch < 8 {
+		branch = 8
 	}
 	return []table.Column{
-		{Title: "", Width: 2},
-		{Title: "harness", Width: 8},
-		{Title: "agent", Width: 12},
-		{Title: "branch", Width: rest},
+		{Title: "", Width: state},
+		{Title: "harness", Width: harness},
+		{Title: "agent", Width: agent},
+		{Title: "task", Width: task},
+		{Title: "branch", Width: branch},
+		{Title: "Δ", Width: delta},
+		{Title: "last", Width: last},
 	}
 }
 
-// worktreeRow renders one worktree (with its lead session, if any) as a table row.
-func worktreeRow(w model.Worktree) table.Row {
-	branch := w.Branch
+// sessionRow renders one work-session as a table row.
+func sessionRow(s model.Session) table.Row {
+	branch := s.Branch
 	if branch == "" {
 		branch = "(detached)"
 	}
-	branch += worktreeSuffix(w)
-
-	harness, agent := "", ""
-	if len(w.Sessions) > 0 {
-		s := w.Sessions[0]
-		harness = s.Harness
-		agent = s.Name
-		if len(w.Sessions) > 1 {
-			agent += fmt.Sprintf(" +%d", len(w.Sessions)-1)
-		}
+	task := s.Task
+	if task == "" {
+		task = "—"
 	}
-	return table.Row{glyph(w), harness, agent, branch}
+	delta := ""
+	if s.ChangeStat.Files > 0 {
+		delta = fmt.Sprintf("+%d/-%d", s.ChangeStat.Added, s.ChangeStat.Removed)
+	}
+	return table.Row{sessionGlyph(s), s.Harness, s.Name, task, branch, delta, relativeTime(s.LastActivity)}
 }
 
-// worktreeSuffix appends dirty / ahead-behind flags to a branch label.
-func worktreeSuffix(w model.Worktree) string {
-	var parts []string
-	if w.Dirty {
-		parts = append(parts, "✱")
+// sessionGlyph is the status marker: ended sessions get ✓; live sessions show
+// their run state.
+func sessionGlyph(s model.Session) string {
+	if !s.Live {
+		return "✓"
 	}
-	if w.Ahead > 0 || w.Behind > 0 {
-		parts = append(parts, fmt.Sprintf("↑%d↓%d", w.Ahead, w.Behind))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return " " + strings.Join(parts, " ")
-}
-
-// glyph is the status marker for a worktree's lead session (space if no agent).
-func glyph(w model.Worktree) string {
-	if len(w.Sessions) == 0 {
-		return " "
-	}
-	s := w.Sessions[0]
 	switch {
 	case s.Status == model.StatusFailed:
 		return "✖"
@@ -108,5 +95,26 @@ func glyph(w model.Worktree) string {
 		return "○"
 	default:
 		return "·"
+	}
+}
+
+// relativeTime renders a compact "time since" (now/5m/3h/2d); empty for zero.
+func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return relativeAge(time.Since(t))
+}
+
+func relativeAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
 }

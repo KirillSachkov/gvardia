@@ -2,6 +2,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/KirillSachkov/gvardia/internal/adapters"
 	"github.com/KirillSachkov/gvardia/internal/model"
@@ -16,9 +17,9 @@ func TestProjectItemMatches(t *testing.T) {
 		q    string
 		want bool
 	}{
-		{"edu", true},      // name
-		{"PLATFORM", true}, // case-insensitive
-		{"feat", true},     // branch
+		{"edu", true},
+		{"PLATFORM", true},
+		{"feat", true},
 		{"zzz", false},
 	} {
 		if got := p.matches(tc.q); got != tc.want {
@@ -27,37 +28,54 @@ func TestProjectItemMatches(t *testing.T) {
 	}
 }
 
-func TestGlyph(t *testing.T) {
+func TestSessionGlyph(t *testing.T) {
 	cases := []struct {
 		name string
-		wt   model.Worktree
+		s    model.Session
 		want string
 	}{
-		{"no agent", model.Worktree{}, " "},
-		{"busy claude", wtWith("claude", model.StatusBusy), "●"},
-		{"idle claude", wtWith("claude", model.StatusIdle), "○"},
-		{"codex", wtWith("codex", model.StatusIdle), "◍"},
-		{"failed", wtWith("claude", model.StatusFailed), "✖"},
+		{"ended", model.Session{Live: false}, "✓"},
+		{"busy claude", model.Session{Live: true, Harness: "claude", Status: model.StatusBusy}, "●"},
+		{"idle claude", model.Session{Live: true, Harness: "claude", Status: model.StatusIdle}, "○"},
+		{"codex", model.Session{Live: true, Harness: "codex", Status: model.StatusIdle}, "◍"},
+		{"failed", model.Session{Live: true, Harness: "claude", Status: model.StatusFailed}, "✖"},
 	}
 	for _, c := range cases {
-		if got := glyph(c.wt); got != c.want {
+		if got := sessionGlyph(c.s); got != c.want {
 			t.Errorf("%s: glyph = %q, want %q", c.name, got, c.want)
 		}
 	}
 }
 
-func TestWorktreeRow(t *testing.T) {
-	row := worktreeRow(model.Worktree{Branch: "main", Dirty: true, Ahead: 2, Sessions: []model.Session{
-		{Harness: "claude", Name: "agent-1", Status: model.StatusBusy},
-	}})
-	if len(row) != 4 {
-		t.Fatalf("row has %d cells, want 4", len(row))
+func TestSessionRow(t *testing.T) {
+	row := sessionRow(model.Session{
+		Live: true, Harness: "claude", Name: "a1", Status: model.StatusBusy,
+		Task: "#675", Branch: "feat/675-s3",
+		ChangeStat: model.ChangeStat{Files: 3, Added: 90, Removed: 12},
+	})
+	if len(row) != 7 {
+		t.Fatalf("row has %d cells, want 7", len(row))
 	}
-	if row[0] != "●" || row[1] != "claude" || row[2] != "agent-1" {
+	if row[0] != "●" || row[1] != "claude" || row[2] != "a1" || row[3] != "#675" ||
+		row[4] != "feat/675-s3" || row[5] != "+90/-12" {
 		t.Errorf("row = %v", row)
 	}
-	if want := "main ✱ ↑2↓0"; row[3] != want {
-		t.Errorf("branch cell = %q, want %q", row[3], want)
+}
+
+func TestRelativeAge(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "now"},
+		{5 * time.Minute, "5m"},
+		{3 * time.Hour, "3h"},
+		{50 * time.Hour, "2d"},
+	}
+	for _, c := range cases {
+		if got := relativeAge(c.d); got != c.want {
+			t.Errorf("relativeAge(%v) = %q, want %q", c.d, got, c.want)
+		}
 	}
 }
 
@@ -78,8 +96,4 @@ func TestFailureBanner(t *testing.T) {
 	if got != "adapters skipped: tmux, codex" {
 		t.Errorf("banner = %q", got)
 	}
-}
-
-func wtWith(harness string, status model.Status) model.Worktree {
-	return model.Worktree{Sessions: []model.Session{{Harness: harness, Status: status}}}
 }

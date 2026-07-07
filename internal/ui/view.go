@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/KirillSachkov/gvardia/internal/adapters"
+	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
 // footerHeight is the number of lines reserved below the body: a status line and
@@ -109,7 +110,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · tab focus · enter diff · a attach · r resume · n new · k kill · g gc · / filter · R refresh · q quit"
+	keys := "↑↓ nav · tab · enter diff · h history · a attach · r resume · n new · k kill · g gc · / filter · R · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
@@ -119,6 +120,31 @@ func (m Model) footer() string {
 		keys = "type to filter · enter apply · esc cancel"
 	}
 	return dim.Render(truncate(keys, m.width))
+}
+
+// detailHeader renders the selected session's summary and a metadata line for
+// the top of the detail pane.
+func detailHeader(s model.Session) string {
+	summary := s.Summary
+	if summary == "" {
+		summary = "(no summary)"
+	}
+	branch := s.Branch
+	if branch == "" {
+		branch = "(detached)"
+	}
+	task := ""
+	if s.Task != "" {
+		task = " · " + s.Task
+	}
+	state := "ended"
+	if s.Live {
+		state = string(s.Status)
+	}
+	meta := fmt.Sprintf("%s %s%s · %s · %d files +%d -%d · %s",
+		state, s.Harness, task, branch,
+		s.ChangeStat.Files, s.ChangeStat.Added, s.ChangeStat.Removed, relativeTime(s.LastActivity))
+	return summary + "\n" + dim.Render(meta)
 }
 
 // failureBanner summarizes skipped adapters for the status line.

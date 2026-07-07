@@ -22,7 +22,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.banner = failureBanner(msg.failures)
 		m.setProjects(msg.projects)
-		return m, m.diffForSelection()
+		return m, tea.Batch(m.diffForSelection(), m.ensureHistory())
 
 	case errMsg:
 		m.loading = false
@@ -30,8 +30,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case diffMsg:
-		m.diff.SetContent(msg.content)
+		header := ""
+		if s := m.selectedSession(); s != nil {
+			header = detailHeader(*s) + "\n\n"
+		}
+		m.diff.SetContent(header + msg.content)
 		m.diff.GotoTop()
+		return m, nil
+
+	case historyMsg:
+		m.historyByProject[msg.projectPath] = msg.sessions
+		m.rebuildSessions()
 		return m, nil
 
 	case execDoneMsg:
@@ -78,19 +87,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.filter.Focus()
 	case "R":
 		return m, collectFleet(m.cfg)
+	case "h":
+		return m.toggleHistory()
 	case "enter":
-		if w := m.selectedWorktree(); w != nil {
+		if w := m.worktreeFor(m.selectedSession()); w != nil {
 			return m, enterDiff(*w, m.cfg)
 		}
 		return m, nil
 	case "a":
-		if w := m.selectedWorktree(); w != nil {
-			return m, attachSession(*w)
+		if s := m.selectedSession(); s != nil {
+			return m, attachSession(*s)
 		}
 		return m, nil
 	case "r":
-		if w := m.selectedWorktree(); w != nil {
-			return m, resumeSession(*w)
+		if s := m.selectedSession(); s != nil {
+			return m, resumeSession(*s)
 		}
 		return m, nil
 	case "k":
@@ -137,9 +148,34 @@ func (m Model) navigateProjects(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.projList.Index() != prev {
 		m.sessions.SetCursor(0)
 		m.rebuildSessions()
-		return m, tea.Batch(cmd, m.diffForSelection())
+		return m, tea.Batch(cmd, m.diffForSelection(), m.ensureHistory())
 	}
 	return m, cmd
+}
+
+// toggleHistory flips the history flag, lazily loading it for the selected
+// project the first time it is shown.
+func (m Model) toggleHistory() (tea.Model, tea.Cmd) {
+	m.showHistory = !m.showHistory
+	cmd := m.ensureHistory()
+	m.rebuildSessions()
+	return m, cmd
+}
+
+// ensureHistory returns a command to load history for the selected project when
+// history is shown and not yet cached; nil otherwise.
+func (m *Model) ensureHistory() tea.Cmd {
+	if !m.showHistory {
+		return nil
+	}
+	p := m.selectedProject()
+	if p == nil {
+		return nil
+	}
+	if _, ok := m.historyByProject[p.Path]; ok {
+		return nil
+	}
+	return loadHistory(p.Path)
 }
 
 // navigateSessions forwards a key to the sessions table and refreshes the diff if
@@ -164,13 +200,19 @@ func (m *Model) refilter() {
 	m.rebuildSessions()
 }
 
-// diffForSelection returns a command to load the diff for the selected worktree,
-// or clears the diff if nothing is selected.
+// diffForSelection shows the selected session's detail header immediately and
+// returns a command to load its worktree diff (nil if nothing/no worktree).
 func (m *Model) diffForSelection() tea.Cmd {
-	w := m.selectedWorktree()
-	if w == nil {
+	s := m.selectedSession()
+	if s == nil {
 		m.diff.SetContent("")
 		return nil
+	}
+	m.diff.SetContent(detailHeader(*s) + "\n\nloading diff…")
+	m.diff.GotoTop()
+	w := m.worktreeFor(s)
+	if w == nil {
+		return nil // ended session whose worktree is gone
 	}
 	return diffStat(w.Path, w.BaseBranch)
 }

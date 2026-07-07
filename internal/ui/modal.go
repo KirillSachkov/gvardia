@@ -64,16 +64,16 @@ func (m Model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// confirmKill opens a confirmation to SIGTERM the selected session's process.
+// confirmKill opens a confirmation to SIGTERM the selected live session's
+// process. Ended (history) sessions have no PID and cannot be killed.
 func (m Model) confirmKill() (tea.Model, tea.Cmd) {
-	w := m.selectedWorktree()
-	if w == nil || len(w.Sessions) == 0 {
+	s := m.selectedSession()
+	if s == nil {
 		m.banner = "no session selected to kill"
 		return m, nil
 	}
-	s := w.Sessions[0]
 	if s.PID <= 0 {
-		m.banner = fmt.Sprintf("%s session has no PID to kill", s.Harness)
+		m.banner = "only a live session with a PID can be killed"
 		return m, nil
 	}
 	m.confirm = &confirmPrompt{

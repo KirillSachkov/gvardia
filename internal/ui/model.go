@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 
+	"github.com/KirillSachkov/gvardia/internal/collect"
 	"github.com/KirillSachkov/gvardia/internal/config"
 	"github.com/KirillSachkov/gvardia/internal/model"
 )
@@ -38,6 +39,10 @@ type Model struct {
 	loading   bool   // true until the first fleet result arrives
 	banner    string // last adapter/collector error, shown in the footer area
 
+	showHistory      bool                       // include ended sessions in the work pane
+	historyByProject map[string][]model.Session // lazily loaded, keyed by project path
+	sessionList      []model.Session            // rows currently in the work table (cursor maps here)
+
 	confirm *confirmPrompt  // non-nil while a y/n confirmation is pending
 	prompt  *newAgentPrompt // non-nil while the new-agent form is open
 }
@@ -60,13 +65,14 @@ func New(cfg config.Config) Model {
 	filter.Placeholder = "filter projects…"
 
 	return Model{
-		cfg:      cfg,
-		projList: projList,
-		sessions: sessions,
-		diff:     viewport.New(),
-		filter:   filter,
-		focus:    focusProjects,
-		loading:  true,
+		cfg:              cfg,
+		projList:         projList,
+		sessions:         sessions,
+		diff:             viewport.New(),
+		filter:           filter,
+		focus:            focusProjects,
+		loading:          true,
+		historyByProject: make(map[string][]model.Session),
 	}
 }
 
@@ -85,17 +91,27 @@ func (m *Model) selectedProject() *model.Project {
 	return &m.projects[item.idx]
 }
 
-// selectedWorktree returns the worktree under the sessions cursor, or nil.
-func (m *Model) selectedWorktree() *model.Worktree {
-	p := m.selectedProject()
-	if p == nil {
-		return nil
-	}
+// selectedSession returns the work-session under the work-pane cursor, or nil.
+func (m *Model) selectedSession() *model.Session {
 	i := m.sessions.Cursor()
-	if i < 0 || i >= len(p.Worktrees) {
+	if i < 0 || i >= len(m.sessionList) {
 		return nil
 	}
-	return &p.Worktrees[i]
+	return &m.sessionList[i]
+}
+
+// worktreeFor returns the worktree a session runs in (by path), or nil.
+func (m *Model) worktreeFor(s *model.Session) *model.Worktree {
+	p := m.selectedProject()
+	if p == nil || s == nil {
+		return nil
+	}
+	for i := range p.Worktrees {
+		if p.Worktrees[i].Path == s.WorktreePath {
+			return &p.Worktrees[i]
+		}
+	}
+	return nil
 }
 
 // setProjects stores a fresh fleet and rebuilds the projects list, preserving the
@@ -132,16 +148,24 @@ func (m *Model) applyFilter(items []list.Item) {
 	m.projList.SetItems(filtered)
 }
 
-// rebuildSessions repopulates the sessions table from the selected project.
+// rebuildSessions repopulates the work table from the selected project's
+// sessions (live, plus ended history when enabled).
 func (m *Model) rebuildSessions() {
 	p := m.selectedProject()
 	if p == nil {
+		m.sessionList = nil
 		m.sessions.SetRows(nil)
 		return
 	}
-	rows := make([]table.Row, 0, len(p.Worktrees))
-	for _, w := range p.Worktrees {
-		rows = append(rows, worktreeRow(w))
+	list := p.WorkSessions
+	if m.showHistory {
+		list = collect.MergeHistory(p.WorkSessions, m.historyByProject[p.Path])
+	}
+	m.sessionList = list
+
+	rows := make([]table.Row, len(list))
+	for i, s := range list {
+		rows[i] = sessionRow(s)
 	}
 	m.sessions.SetRows(rows)
 	if m.sessions.Cursor() >= len(rows) {
