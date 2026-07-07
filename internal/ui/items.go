@@ -78,6 +78,60 @@ func sessionRow(s model.Session) table.Row {
 	return table.Row{sessionGlyph(s), s.Harness, s.Name, task, branch, delta, relativeTime(s.LastActivity)}
 }
 
+// worktreeColumns returns the worktree-pane columns sized to the given width;
+// branch absorbs the slack.
+func worktreeColumns(width int) []table.Column {
+	const state, ab, delta, agent, commit = 2, 7, 9, 14, 6
+	branch := width - (state + ab + delta + agent + commit)
+	if branch < 8 {
+		branch = 8
+	}
+	return []table.Column{
+		{Title: "", Width: state},
+		{Title: "branch", Width: branch},
+		{Title: "±", Width: ab},
+		{Title: "Δ", Width: delta},
+		{Title: "agent", Width: agent},
+		{Title: "commit", Width: commit},
+	}
+}
+
+// worktreeRow2 renders one worktree as a table row, marking whether a live agent
+// runs in it (from the joined sessions).
+func worktreeRow2(w model.Worktree) table.Row {
+	branch := w.Branch
+	if branch == "" {
+		branch = "(detached)"
+	}
+	if w.IsPrimary {
+		branch += " *"
+	}
+	ab := ""
+	if w.Ahead > 0 || w.Behind > 0 {
+		ab = fmt.Sprintf("↑%d↓%d", w.Ahead, w.Behind)
+	}
+	delta := ""
+	if w.ChangeStat.Files > 0 {
+		delta = fmt.Sprintf("+%d/-%d", w.ChangeStat.Added, w.ChangeStat.Removed)
+	}
+	agent := "·"
+	if len(w.Sessions) > 0 {
+		agent = "● " + w.Sessions[0].Harness
+		if len(w.Sessions) > 1 {
+			agent = fmt.Sprintf("● %s +%d", w.Sessions[0].Harness, len(w.Sessions)-1)
+		}
+	}
+	return table.Row{worktreeGlyph(w), branch, ab, delta, agent, relativeTime(w.LastCommit)}
+}
+
+// worktreeGlyph marks a worktree dirty (◆) or clean (◇).
+func worktreeGlyph(w model.Worktree) string {
+	if w.Dirty {
+		return "◆"
+	}
+	return "◇"
+}
+
 // sessionGlyph is the status marker: ended sessions get ✓; live sessions show
 // their run state.
 func sessionGlyph(s model.Session) string {

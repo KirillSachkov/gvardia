@@ -46,6 +46,8 @@ type Model struct {
 	showHistory      bool                       // include ended sessions in the work pane
 	historyByProject map[string][]model.Session // lazily loaded, keyed by project path
 	sessionList      []model.Session            // rows currently in the work table (cursor maps here)
+	worktreeView     bool                       // true when the right pane lists worktrees instead of agents
+	worktreeList     []model.Worktree           // rows in the worktree view (cursor maps here)
 	curated          bool                       // true when showing a curated tracked list (not a roots scan)
 
 	confirm    *confirmPrompt  // non-nil while a y/n confirmation is pending
@@ -97,13 +99,58 @@ func (m *Model) selectedProject() *model.Project {
 	return &m.projects[item.idx]
 }
 
-// selectedSession returns the work-session under the work-pane cursor, or nil.
+// selectedSession returns the work-session for the current selection. In the
+// agents view it maps the cursor into sessionList; in the worktree view it
+// returns the live session running in the selected worktree (if any), so
+// attach/resume/kill act on the right agent.
 func (m *Model) selectedSession() *model.Session {
+	if m.worktreeView {
+		w := m.selectedWorktree()
+		if w == nil {
+			return nil
+		}
+		p := m.selectedProject()
+		if p == nil {
+			return nil
+		}
+		for i := range p.WorkSessions {
+			if p.WorkSessions[i].WorktreePath == w.Path {
+				return &p.WorkSessions[i]
+			}
+		}
+		return nil
+	}
 	i := m.sessions.Cursor()
 	if i < 0 || i >= len(m.sessionList) {
 		return nil
 	}
 	return &m.sessionList[i]
+}
+
+// selectedWorktree returns the worktree under the cursor in the worktree view.
+func (m *Model) selectedWorktree() *model.Worktree {
+	i := m.sessions.Cursor()
+	if i < 0 || i >= len(m.worktreeList) {
+		return nil
+	}
+	return &m.worktreeList[i]
+}
+
+// currentDetail returns the detail header and diff-target worktree for the
+// current selection in either view. The header is "" when nothing is selected.
+func (m *Model) currentDetail() (string, *model.Worktree) {
+	if m.worktreeView {
+		w := m.selectedWorktree()
+		if w == nil {
+			return "", nil
+		}
+		return worktreeHeader(*w), w
+	}
+	s := m.selectedSession()
+	if s == nil {
+		return "", nil
+	}
+	return detailHeader(*s), m.worktreeFor(s)
 }
 
 // worktreeFor returns the worktree a session runs in (by path), or nil.
@@ -154,27 +201,53 @@ func (m *Model) applyFilter(items []list.Item) {
 	m.projList.SetItems(filtered)
 }
 
-// rebuildSessions repopulates the work table from the selected project's
-// sessions (live, plus ended history when enabled).
+// applyColumns sets the work-table columns for the active view. Callers must
+// ensure the table holds no stale rows of a different column count first, since
+// SetColumns re-renders the current rows.
+func (m *Model) applyColumns() {
+	w := m.geometry().rightInnerW
+	if m.worktreeView {
+		m.sessions.SetColumns(worktreeColumns(w))
+	} else {
+		m.sessions.SetColumns(sessionColumns(w))
+	}
+}
+
+// rebuildSessions repopulates the work table for the selected project: either
+// the agent sessions (live, plus ended history when enabled) or, in the worktree
+// view, every worktree. Rows are cleared before the columns are (re)applied so a
+// view switch never renders old rows against the new column set.
 func (m *Model) rebuildSessions() {
+	m.sessions.SetRows(nil)
+	m.applyColumns()
+
 	p := m.selectedProject()
 	if p == nil {
 		m.sessionList = nil
-		m.sessions.SetRows(nil)
+		m.worktreeList = nil
 		return
 	}
-	list := p.WorkSessions
-	if m.showHistory {
-		list = collect.MergeHistory(p.WorkSessions, m.historyByProject[p.Path])
-	}
-	m.sessionList = list
 
-	rows := make([]table.Row, len(list))
-	for i, s := range list {
-		rows[i] = sessionRow(s)
+	var rows []table.Row
+	if m.worktreeView {
+		m.worktreeList = p.Worktrees
+		rows = make([]table.Row, len(p.Worktrees))
+		for i, w := range p.Worktrees {
+			rows[i] = worktreeRow2(w)
+		}
+	} else {
+		list := p.WorkSessions
+		if m.showHistory {
+			list = collect.MergeHistory(p.WorkSessions, m.historyByProject[p.Path])
+		}
+		m.sessionList = list
+		rows = make([]table.Row, len(list))
+		for i, s := range list {
+			rows[i] = sessionRow(s)
+		}
 	}
 	m.sessions.SetRows(rows)
-	if m.sessions.Cursor() >= len(rows) {
+	if c := m.sessions.Cursor(); (c < 0 || c >= len(rows)) && len(rows) > 0 {
 		m.sessions.SetCursor(0)
 	}
 }

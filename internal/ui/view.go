@@ -119,7 +119,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · enter drill · esc back · d diff · h history · a attach · r resume · n new · A add · X untrack · C create · k kill · g gc · / filter · R · q"
+	keys := "↑↓ nav · enter drill · esc back · d diff · w worktrees · h history · a attach · r resume · n new · A add · X untrack · C create · k kill · g gc · / filter · R · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
@@ -156,6 +156,34 @@ func detailHeader(s model.Session) string {
 		state, s.Harness, task, branch,
 		s.ChangeStat.Files, s.ChangeStat.Added, s.ChangeStat.Removed, relativeTime(s.LastActivity))
 	return summary + "\n" + dim.Render(meta)
+}
+
+// worktreeHeader renders the selected worktree's path and a metadata line for
+// the top of the detail pane in the worktree view.
+func worktreeHeader(w model.Worktree) string {
+	branch := w.Branch
+	if branch == "" {
+		branch = "(detached)"
+	}
+	kind := "linked"
+	if w.IsPrimary {
+		kind = "primary"
+	}
+	state := "clean"
+	if w.Dirty {
+		state = "dirty"
+	}
+	agent := "no agent"
+	if len(w.Sessions) > 0 {
+		agent = w.Sessions[0].Harness
+		if len(w.Sessions) > 1 {
+			agent = fmt.Sprintf("%s +%d", w.Sessions[0].Harness, len(w.Sessions)-1)
+		}
+	}
+	meta := fmt.Sprintf("%s %s · %s · ↑%d↓%d · %d files +%d -%d · %s · %s",
+		kind, branch, state, w.Ahead, w.Behind,
+		w.ChangeStat.Files, w.ChangeStat.Added, w.ChangeStat.Removed, agent, relativeTime(w.LastCommit))
+	return w.Path + "\n" + dim.Render(meta)
 }
 
 // failureBanner summarizes skipped adapters for the status line.

@@ -38,9 +38,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case diffMsg:
-		header := ""
-		if s := m.selectedSession(); s != nil {
-			header = detailHeader(*s) + "\n\n"
+		header, _ := m.currentDetail()
+		if header != "" {
+			header += "\n\n"
 		}
 		m.diff.SetContent(header + msg.content)
 		m.diff.GotoTop()
@@ -104,10 +104,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc", "backspace":
 		return m.drillUp()
 	case "d":
-		if w := m.worktreeFor(m.selectedSession()); w != nil {
+		if w := m.selectionWorktree(); w != nil {
 			return m, enterDiff(*w, m.cfg)
 		}
 		return m, nil
+	case "w":
+		m.worktreeView = !m.worktreeView
+		m.sessions.SetCursor(0)
+		m.rebuildSessions()
+		return m, m.diffForSelection()
 	case "a":
 		if s := m.selectedSession(); s != nil {
 			return m, attachSession(*s)
@@ -151,7 +156,7 @@ func (m Model) drillDown() (tea.Model, tea.Cmd) {
 		m.level = levelWork
 		return m, m.diffForSelection()
 	case levelWork:
-		if m.selectedSession() == nil {
+		if h, _ := m.currentDetail(); h == "" {
 			return m, nil
 		}
 		m.level = levelDetail
@@ -260,25 +265,32 @@ func (m *Model) refilter() {
 	m.rebuildSessions()
 }
 
-// diffForSelection shows the selected session's detail header immediately and
+// diffForSelection shows the current selection's detail header immediately and
 // returns a command to load its worktree diff. The detail pane is never left
-// blank: with no session it explains why and how to populate the view.
+// blank: with no selection it explains why and how to populate the view, and an
+// orphaned session shows its header without a diff.
 func (m *Model) diffForSelection() tea.Cmd {
-	s := m.selectedSession()
-	if s == nil {
+	header, w := m.currentDetail()
+	if header == "" {
 		m.diff.SetContent(emptyDetail(m.selectedProject()))
 		m.diff.GotoTop()
 		return nil
 	}
-	m.diff.SetContent(detailHeader(*s) + "\n\nloading diff…")
-	m.diff.GotoTop()
-	w := m.worktreeFor(s)
 	if w == nil {
-		// Ended session whose worktree is gone: show the header, no diff.
-		m.diff.SetContent(detailHeader(*s) + "\n\n" + dim.Render("worktree gone — history only"))
+		m.diff.SetContent(header + "\n\n" + dim.Render("worktree gone — history only"))
+		m.diff.GotoTop()
 		return nil
 	}
+	m.diff.SetContent(header + "\n\nloading diff…")
+	m.diff.GotoTop()
 	return diffStat(w.Path, w.BaseBranch)
+}
+
+// selectionWorktree returns the worktree behind the current selection (either
+// view), for the diff key.
+func (m *Model) selectionWorktree() *model.Worktree {
+	_, w := m.currentDetail()
+	return w
 }
 
 // emptyDetail is the placeholder shown when no session is selected, so the
@@ -298,7 +310,7 @@ func (m *Model) layout() {
 	}
 	g := m.geometry()
 	m.projList.SetSize(g.leftInnerW, g.leftInnerH)
-	m.sessions.SetColumns(sessionColumns(g.rightInnerW))
+	m.applyColumns()
 	m.sessions.SetWidth(g.rightInnerW)
 	m.sessions.SetHeight(g.sessInnerH)
 	m.diff.SetWidth(g.rightInnerW)
