@@ -99,6 +99,7 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if m.level == levelProjects {
 		m.projList, cmd = m.projList.Update(msg)
 	} else {
+		m.sessions.Focus()
 		m.sessions, cmd = m.sessions.Update(msg)
 	}
 	return m, cmd
@@ -392,6 +393,7 @@ func (m Model) switchTab(tab workTab) (tea.Model, tea.Cmd) {
 func (m Model) navigateSessions(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	prev := m.sessions.Cursor()
 	var cmd tea.Cmd
+	m.sessions.Focus()
 	m.sessions, cmd = m.sessions.Update(msg)
 	if m.sessions.Cursor() != prev {
 		return m, tea.Batch(cmd, m.diffForSelection())

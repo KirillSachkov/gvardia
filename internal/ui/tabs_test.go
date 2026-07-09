@@ -68,6 +68,19 @@ func TestEnterAndEscMoveFocusWithoutModeJumps(t *testing.T) {
 	}
 }
 
+func TestAgentsTabArrowKeysMoveBetweenAgents(t *testing.T) {
+	m := readyWithOpsData(t)
+	m, _ = step(m, keyText("j"))           // beta has two live agent rows
+	m, _ = step(m, keyPress(tea.KeyEnter)) // focus the agents tab
+	m, _ = step(m, keyPress(tea.KeyDown))  // move from b1 to b2
+	if got := m.sessions.Cursor(); got != 1 {
+		t.Fatalf("down arrow in agents tab cursor = %d, want 1", got)
+	}
+	if s := m.selectedSession(); s == nil || s.Name != "b2" {
+		t.Fatalf("selected agent after down = %+v, want b2", s)
+	}
+}
+
 func TestFooterIsContextualAndNotAHotkeyDump(t *testing.T) {
 	m := readyWithOpsData(t)
 	out := m.footer()
