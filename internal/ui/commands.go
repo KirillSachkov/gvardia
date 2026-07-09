@@ -363,7 +363,11 @@ func killRun(r runs.Run) tea.Cmd {
 			return errMsg{err}
 		}
 		r.Status = runs.StatusKilled
-		if err := (runs.Store{}).Save(r); err != nil {
+		store := runs.Store{}
+		if err := store.WriteStatus(r.Dir(), runs.TelemetryStatus{State: runs.StatusKilled, Phase: "killed", Summary: "Run killed from Gvardia", NeedsReview: true}); err != nil {
+			return errMsg{err}
+		}
+		if err := store.Save(r); err != nil {
 			return errMsg{err}
 		}
 		return execDoneMsg{}
@@ -382,6 +386,8 @@ func launchRun(project model.Project, task model.Task, profile runners.RunnerPro
 		branch := "gvardia/" + id
 		worktree := filepath.Join(filepath.Dir(project.Path), project.Name+"-"+id)
 		target := "gvardia-" + id
+		runDir := filepath.Join(project.Path, ".gvardia", "runs", id)
+		reportPath := filepath.Join(runDir, "report.md")
 
 		add := exec.CommandContext(ctx, "git", "-C", project.Path, "worktree", "add", "-b", branch, worktree)
 		if out, err := add.CombinedOutput(); err != nil {
@@ -389,12 +395,15 @@ func launchRun(project model.Project, task model.Task, profile runners.RunnerPro
 		}
 
 		store := runs.Store{NewID: func() string { return id }}
-		reportPath := filepath.Join(project.Path, ".gvardia", "runs", id, "report.md")
 		prompt := prompts.Render(prompts.Context{
-			Task:        task,
-			ProjectName: project.Name,
-			ProjectPath: project.Path,
-			ReportPath:  reportPath,
+			Task:         task,
+			ProjectName:  project.Name,
+			ProjectPath:  project.Path,
+			RunDir:       runDir,
+			ReportPath:   reportPath,
+			StatusPath:   filepath.Join(runDir, "status.json"),
+			EventsPath:   filepath.Join(runDir, "events.jsonl"),
+			ArtifactsDir: filepath.Join(runDir, "artifacts"),
 		})
 		run, err := store.Create(project.Path, runs.CreateInput{
 			Project: project.Name, TaskID: task.ID, TaskTitle: task.Title,
@@ -409,18 +418,42 @@ func launchRun(project model.Project, task model.Task, profile runners.RunnerPro
 			PromptPath: run.PromptPath, WorktreePath: worktree, ReportPath: run.ReportPath, TaskTitle: task.Title,
 		})
 		if _, err := (terminal.TmuxService{}).Launch(ctx, terminal.LaunchSpec{
-			RunID: id, Worktree: worktree, Command: command, Target: target, WindowTitle: task.Title,
+			RunID: id, Worktree: worktree, Command: command, Env: runEnvironment(run), Target: target, WindowTitle: task.Title,
 		}); err != nil {
 			run.Status = runs.StatusFailed
+			_ = store.WriteStatus(run.Dir(), runs.TelemetryStatus{State: runs.StatusFailed, Phase: "launch", Summary: err.Error(), NeedsReview: true})
 			_ = store.Save(run)
 			return errMsg{err}
 		}
 		run.Status = runs.StatusRunning
+		if err := store.WriteStatus(run.Dir(), runs.TelemetryStatus{State: runs.StatusRunning, Phase: "launched", Summary: "Agent launched in tmux"}); err != nil {
+			return errMsg{err}
+		}
+		_ = store.AppendEvent(run.Dir(), runs.Event{Type: "launch", Message: "Agent launched in " + target})
 		if err := store.Save(run); err != nil {
 			return errMsg{err}
 		}
 		return runLaunchedMsg{run: run}
 	}
+}
+
+func runEnvironment(run runs.Run) map[string]string {
+	env := map[string]string{
+		"GVARDIA_RUN_ID":         run.ID,
+		"GVARDIA_RUN_DIR":        run.Dir(),
+		"GVARDIA_PROMPT_PATH":    run.PromptPath,
+		"GVARDIA_REPORT_PATH":    run.ReportPath,
+		"GVARDIA_STATUS_PATH":    run.StatusPath,
+		"GVARDIA_EVENTS_PATH":    run.EventsPath,
+		"GVARDIA_ARTIFACTS_PATH": run.ArtifactsPath,
+		"GVARDIA_ARTIFACTS_DIR":  run.ArtifactsDir,
+	}
+	for key, value := range env {
+		if value == "" {
+			delete(env, key)
+		}
+	}
+	return env
 }
 
 // gcRoot runs wt-prune (which preserves primary/dirty worktrees) for a root, then

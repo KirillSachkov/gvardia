@@ -54,6 +54,9 @@ func TestEnterAndEscMoveFocusWithoutModeJumps(t *testing.T) {
 	if m.level != levelWork {
 		t.Fatalf("enter from projects level = %v, want work", m.level)
 	}
+	if m.showProjects {
+		t.Fatal("enter from projects should hide the projects drawer")
+	}
 	m, _ = step(m, keyText("2"))
 	if m.level != levelWork {
 		t.Fatalf("switching tabs should keep work focus, got %v", m.level)
@@ -65,6 +68,36 @@ func TestEnterAndEscMoveFocusWithoutModeJumps(t *testing.T) {
 	m, _ = step(m, keyPress(tea.KeyEscape))
 	if m.level != levelWork || m.activeTab != tabTasks {
 		t.Fatalf("esc should return to tasks list, got level=%v tab=%v", m.level, m.activeTab)
+	}
+}
+
+func TestProjectDrawerAndPaneNavigation(t *testing.T) {
+	m := readyWithOpsData(t)
+	if !m.showProjects || m.level != levelProjects {
+		t.Fatalf("initial drawer=%v level=%v, want visible projects", m.showProjects, m.level)
+	}
+
+	m, _ = step(m, keyPress(tea.KeyEnter))
+	if m.showProjects || m.level != levelWork {
+		t.Fatalf("enter should hide projects and focus work, drawer=%v level=%v", m.showProjects, m.level)
+	}
+
+	m, _ = step(m, keyText("p"))
+	if !m.showProjects || m.level != levelProjects {
+		t.Fatalf("p should show projects and focus them, drawer=%v level=%v", m.showProjects, m.level)
+	}
+
+	m, _ = step(m, keyPress(tea.KeyRight))
+	if m.level != levelWork {
+		t.Fatalf("right from projects level=%v, want work", m.level)
+	}
+	m, _ = step(m, keyPress(tea.KeyRight))
+	if m.level != levelDetail {
+		t.Fatalf("right from work level=%v, want detail", m.level)
+	}
+	m, _ = step(m, keyPress(tea.KeyLeft))
+	if m.level != levelWork {
+		t.Fatalf("left from detail level=%v, want work", m.level)
 	}
 }
 

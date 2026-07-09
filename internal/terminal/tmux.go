@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
+	"strings"
 )
 
 // Runner runs an external command. Tests fake it.
@@ -33,6 +35,7 @@ type LaunchSpec struct {
 	RunID       string
 	Worktree    string
 	Command     string
+	Env         map[string]string
 	Target      string
 	WindowTitle string
 }
@@ -53,17 +56,48 @@ func (s TmuxService) Launch(ctx context.Context, spec LaunchSpec) (string, error
 	if title == "" {
 		title = target
 	}
+	command := withShellEnv(spec.Command, spec.Env)
 	_, err := s.runner().Run(ctx, "", "tmux",
 		"new-session", "-d",
 		"-s", target,
 		"-c", spec.Worktree,
 		"-n", title,
-		"sh", "-lc", spec.Command,
+		"sh", "-lc", command,
 	)
 	if err != nil {
 		return "", fmt.Errorf("tmux launch: %w", err)
 	}
 	return target, nil
+}
+
+func withShellEnv(command string, env map[string]string) string {
+	if len(env) == 0 {
+		return command
+	}
+	keys := make([]string, 0, len(env))
+	for key, value := range env {
+		if key == "" || value == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return command
+	}
+	parts := make([]string, 0, len(keys)+1)
+	for _, key := range keys {
+		parts = append(parts, "export "+key+"="+shellQuote(env[key]))
+	}
+	parts = append(parts, command)
+	return strings.Join(parts, "; ")
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // Attach attaches the current terminal to a tmux target.

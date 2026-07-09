@@ -24,7 +24,14 @@ func readyWithRuns(t *testing.T) Model {
 				TaskTitle: "Build ops console", Runner: "claude", Tool: "claude",
 				Status: runs.StatusReview, TmuxTarget: "gvardia-run-1",
 				WorktreePath: "/r/alpha-wt", Branch: "gvardia/run-1",
-				Report: "REPORT_READY", UpdatedAt: time.Now(),
+				Report:    "REPORT_READY",
+				Telemetry: runs.TelemetryStatus{Phase: "verify", Summary: "Tests finished"},
+				Events:    []runs.Event{{Type: "status", Message: "Started verification"}},
+				RunArtifacts: []runs.RunArtifact{
+					{Type: "plan", Title: "Implementation plan", Path: "artifacts/plan.md"},
+					{Type: "report", Title: "Final report", Path: "report.md"},
+				},
+				UpdatedAt:  time.Now(),
 				ChangeStat: model.ChangeStat{Files: 1, Added: 5, Removed: 2},
 				Artifacts:  []model.Artifact{{Status: "M", Path: "internal/ui/view.go"}},
 			}},
@@ -42,7 +49,12 @@ func TestRunsViewShowsRunsAndReport(t *testing.T) {
 		t.Fatalf("runs table rows = %d, want 1", len(m.sessions.Rows()))
 	}
 	out := m.render()
-	if !strings.Contains(out, "Build ops console") || !strings.Contains(out, "REPORT_READY") || !strings.Contains(out, "internal/ui/view.go") {
+	for _, want := range []string{"Objective", "Evidence", "Activity", "Tests finished", "REPORT_READY", "internal/ui/view.go"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("runs view missing %q; render:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "Build ops console") {
 		t.Errorf("runs view should show task and report; render:\n%s", out)
 	}
 }
@@ -63,6 +75,36 @@ func TestOpenRunReportReturnsCommand(t *testing.T) {
 	_, cmd := step(m, keyText("o"))
 	if cmd == nil {
 		t.Fatal("o on selected run should return report viewer command")
+	}
+}
+
+func TestRunEnvironmentIncludesTelemetryPaths(t *testing.T) {
+	run := runs.Run{
+		ID:            "run-123",
+		ProjectPath:   "/repo",
+		MetaPath:      "/repo/.gvardia/runs/run-123/meta.json",
+		PromptPath:    "/repo/.gvardia/runs/run-123/prompt.md",
+		ReportPath:    "/repo/.gvardia/runs/run-123/report.md",
+		StatusPath:    "/repo/.gvardia/runs/run-123/status.json",
+		EventsPath:    "/repo/.gvardia/runs/run-123/events.jsonl",
+		ArtifactsPath: "/repo/.gvardia/runs/run-123/artifacts.json",
+		ArtifactsDir:  "/repo/.gvardia/runs/run-123/artifacts",
+	}
+
+	got := runEnvironment(run)
+	for _, key := range []string{
+		"GVARDIA_RUN_ID",
+		"GVARDIA_RUN_DIR",
+		"GVARDIA_PROMPT_PATH",
+		"GVARDIA_REPORT_PATH",
+		"GVARDIA_STATUS_PATH",
+		"GVARDIA_EVENTS_PATH",
+		"GVARDIA_ARTIFACTS_PATH",
+		"GVARDIA_ARTIFACTS_DIR",
+	} {
+		if got[key] == "" {
+			t.Fatalf("runEnvironment missing %s: %+v", key, got)
+		}
 	}
 }
 

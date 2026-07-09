@@ -86,7 +86,7 @@ func (m Model) handleTasksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.filtering = true
 		return m, m.filter.Focus()
-	case "p":
+	case "s":
 		m.taskScope = !m.taskScope
 		m.rebuildTasks()
 		return m, nil

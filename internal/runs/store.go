@@ -28,25 +28,32 @@ const (
 
 // Run is one local agent execution tracked by gvardia.
 type Run struct {
-	ID           string           `json:"id"`
-	Project      string           `json:"project"`
-	ProjectPath  string           `json:"projectPath"`
-	TaskID       string           `json:"taskId,omitempty"`
-	TaskTitle    string           `json:"taskTitle,omitempty"`
-	Runner       string           `json:"runner"`
-	Tool         string           `json:"tool"`
-	Status       Status           `json:"status"`
-	TmuxTarget   string           `json:"tmuxTarget,omitempty"`
-	WorktreePath string           `json:"worktreePath,omitempty"`
-	Branch       string           `json:"branch,omitempty"`
-	PromptPath   string           `json:"promptPath"`
-	MetaPath     string           `json:"metaPath"`
-	ReportPath   string           `json:"reportPath"`
-	Report       string           `json:"-"`
-	ChangeStat   model.ChangeStat `json:"-"`
-	Artifacts    []model.Artifact `json:"-"`
-	CreatedAt    time.Time        `json:"createdAt"`
-	UpdatedAt    time.Time        `json:"updatedAt"`
+	ID            string           `json:"id"`
+	Project       string           `json:"project"`
+	ProjectPath   string           `json:"projectPath"`
+	TaskID        string           `json:"taskId,omitempty"`
+	TaskTitle     string           `json:"taskTitle,omitempty"`
+	Runner        string           `json:"runner"`
+	Tool          string           `json:"tool"`
+	Status        Status           `json:"status"`
+	TmuxTarget    string           `json:"tmuxTarget,omitempty"`
+	WorktreePath  string           `json:"worktreePath,omitempty"`
+	Branch        string           `json:"branch,omitempty"`
+	PromptPath    string           `json:"promptPath"`
+	MetaPath      string           `json:"metaPath"`
+	ReportPath    string           `json:"reportPath"`
+	StatusPath    string           `json:"statusPath,omitempty"`
+	EventsPath    string           `json:"eventsPath,omitempty"`
+	ArtifactsPath string           `json:"artifactsPath,omitempty"`
+	ArtifactsDir  string           `json:"artifactsDir,omitempty"`
+	Report        string           `json:"-"`
+	Telemetry     TelemetryStatus  `json:"-"`
+	Events        []Event          `json:"-"`
+	RunArtifacts  []RunArtifact    `json:"-"`
+	ChangeStat    model.ChangeStat `json:"-"`
+	Artifacts     []model.Artifact `json:"-"`
+	CreatedAt     time.Time        `json:"createdAt"`
+	UpdatedAt     time.Time        `json:"updatedAt"`
 }
 
 // CreateInput is the caller-supplied data for creating a run.
@@ -78,25 +85,47 @@ func (s Store) Create(projectPath string, in CreateInput) (Run, error) {
 	}
 
 	run := Run{
-		ID:           id,
-		Project:      in.Project,
-		ProjectPath:  projectPath,
-		TaskID:       in.TaskID,
-		TaskTitle:    in.TaskTitle,
-		Runner:       in.Runner,
-		Tool:         in.Tool,
-		Status:       StatusPending,
-		TmuxTarget:   in.TmuxTarget,
-		WorktreePath: in.WorktreePath,
-		Branch:       in.Branch,
-		PromptPath:   filepath.Join(dir, "prompt.md"),
-		MetaPath:     filepath.Join(dir, "meta.json"),
-		ReportPath:   filepath.Join(dir, "report.md"),
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:            id,
+		Project:       in.Project,
+		ProjectPath:   projectPath,
+		TaskID:        in.TaskID,
+		TaskTitle:     in.TaskTitle,
+		Runner:        in.Runner,
+		Tool:          in.Tool,
+		Status:        StatusPending,
+		TmuxTarget:    in.TmuxTarget,
+		WorktreePath:  in.WorktreePath,
+		Branch:        in.Branch,
+		PromptPath:    filepath.Join(dir, "prompt.md"),
+		MetaPath:      filepath.Join(dir, "meta.json"),
+		ReportPath:    filepath.Join(dir, "report.md"),
+		StatusPath:    filepath.Join(dir, "status.json"),
+		EventsPath:    filepath.Join(dir, "events.jsonl"),
+		ArtifactsPath: filepath.Join(dir, "artifacts.json"),
+		ArtifactsDir:  filepath.Join(dir, "artifacts"),
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := os.WriteFile(run.PromptPath, []byte(in.Prompt), 0o644); err != nil {
 		return Run{}, fmt.Errorf("write prompt: %w", err)
+	}
+	if err := os.MkdirAll(run.ArtifactsDir, 0o755); err != nil {
+		return Run{}, fmt.Errorf("create artifacts dir: %w", err)
+	}
+	run.Telemetry = TelemetryStatus{
+		State:     StatusPending,
+		Phase:     "created",
+		Summary:   "Run created",
+		UpdatedAt: now,
+	}
+	if err := s.WriteStatus(dir, run.Telemetry); err != nil {
+		return Run{}, err
+	}
+	if err := os.WriteFile(run.EventsPath, nil, 0o644); err != nil {
+		return Run{}, fmt.Errorf("write events: %w", err)
+	}
+	if err := writeJSON(run.ArtifactsPath, []RunArtifact{}); err != nil {
+		return Run{}, err
 	}
 	if err := s.Save(run); err != nil {
 		return Run{}, err
@@ -121,6 +150,7 @@ func (s Store) Save(run Run) error {
 	if run.ReportPath == "" {
 		run.ReportPath = filepath.Join(runDir(run.ProjectPath, run.ID), "report.md")
 	}
+	fillTelemetryPaths(&run)
 	run.UpdatedAt = s.now()
 	if run.CreatedAt.IsZero() {
 		run.CreatedAt = run.UpdatedAt
@@ -177,9 +207,19 @@ func (s Store) LoadProject(projectPath string) ([]Run, error) {
 		if run.ReportPath == "" {
 			run.ReportPath = filepath.Join(root, e.Name(), "report.md")
 		}
+		fillTelemetryPaths(&run)
+		run.Telemetry = readStatus(run.StatusPath)
+		if run.Telemetry.State != "" {
+			run.Status = run.Telemetry.State
+		}
+		run.Events = readEvents(run.EventsPath)
+		run.RunArtifacts = readArtifacts(run.ArtifactsPath)
 		if report, err := os.ReadFile(run.ReportPath); err == nil {
 			run.Report = strings.TrimSpace(string(report))
-			if run.Status == StatusRunning && run.Report != "" {
+			if run.Report != "" {
+				run.RunArtifacts = ensureReportArtifact(run.RunArtifacts)
+			}
+			if (run.Status == StatusRunning || run.Status == StatusPending) && run.Report != "" {
 				run.Status = StatusReview
 			}
 		}
@@ -205,4 +245,34 @@ func (s Store) newID(now time.Time) string {
 
 func runDir(projectPath, id string) string {
 	return filepath.Join(projectPath, ".gvardia", "runs", id)
+}
+
+// Dir returns the run directory.
+func (r Run) Dir() string {
+	if r.MetaPath != "" {
+		return filepath.Dir(r.MetaPath)
+	}
+	if r.ProjectPath == "" || r.ID == "" {
+		return ""
+	}
+	return runDir(r.ProjectPath, r.ID)
+}
+
+func fillTelemetryPaths(run *Run) {
+	dir := run.Dir()
+	if dir == "" {
+		return
+	}
+	if run.StatusPath == "" {
+		run.StatusPath = filepath.Join(dir, "status.json")
+	}
+	if run.EventsPath == "" {
+		run.EventsPath = filepath.Join(dir, "events.jsonl")
+	}
+	if run.ArtifactsPath == "" {
+		run.ArtifactsPath = filepath.Join(dir, "artifacts.json")
+	}
+	if run.ArtifactsDir == "" {
+		run.ArtifactsDir = filepath.Join(dir, "artifacts")
+	}
 }

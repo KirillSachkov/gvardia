@@ -92,7 +92,7 @@ func runColumns(width int) []table.Column {
 		{Title: "task", Width: task},
 		{Title: "branch", Width: branch},
 		{Title: "Δ", Width: delta},
-		{Title: "tmux", Width: tmux},
+		{Title: "terminal", Width: tmux},
 		{Title: "last", Width: last},
 	}
 }

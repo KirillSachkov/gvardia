@@ -110,7 +110,7 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	g := m.geometry()
-	leftOuterW := g.leftInnerW + 2
+	leftOuterW := g.leftOuterW
 	rightX := msg.X - leftOuterW
 	if rightX >= 0 && rightX < g.rightInnerW && msg.Y <= 2 {
 		idx := rightX * len(workTabs) / max1(g.rightInnerW)
@@ -122,7 +122,7 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.switchTab(workTabs[idx].tab)
 	}
-	if msg.X < leftOuterW {
+	if m.showProjects && msg.X < leftOuterW {
 		m.level = levelProjects
 		return m, nil
 	}
@@ -157,12 +157,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "tab":
-		if m.level == levelProjects {
-			m.level = levelWork
-		} else {
-			m.level = levelProjects
-		}
-		return m, m.diffForSelection()
+		return m.nextPane()
+	case "right":
+		return m.movePaneRight()
+	case "left":
+		return m.movePaneLeft()
 	case "/":
 		m.filtering = true
 		return m, m.filter.Focus()
@@ -233,6 +232,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		return m, m.openLaunchPrompt()
 	case "p":
+		return m.toggleProjectsDrawer()
+	case "s":
 		if m.activeTab == tabTasks {
 			m.taskScope = !m.taskScope
 			m.sessions.SetCursor(0)
@@ -274,13 +275,70 @@ func (m Model) handleActionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) toggleProjectsDrawer() (tea.Model, tea.Cmd) {
+	m.showProjects = !m.showProjects
+	if m.showProjects {
+		m.level = levelProjects
+	} else if m.level == levelProjects {
+		m.level = levelWork
+	}
+	m.layout()
+	return m, m.diffForSelection()
+}
+
+func (m Model) nextPane() (tea.Model, tea.Cmd) {
+	switch m.level {
+	case levelProjects:
+		m.level = levelWork
+	case levelWork:
+		if header, _ := m.currentDetail(); header != "" {
+			m.level = levelDetail
+		} else if m.showProjects {
+			m.level = levelProjects
+		}
+	case levelDetail:
+		if m.showProjects {
+			m.level = levelProjects
+		} else {
+			m.level = levelWork
+		}
+	}
+	return m, m.diffForSelection()
+}
+
+func (m Model) movePaneRight() (tea.Model, tea.Cmd) {
+	switch m.level {
+	case levelProjects:
+		m.level = levelWork
+	case levelWork:
+		if header, _ := m.currentDetail(); header != "" {
+			m.level = levelDetail
+		}
+	}
+	return m, m.diffForSelection()
+}
+
+func (m Model) movePaneLeft() (tea.Model, tea.Cmd) {
+	switch m.level {
+	case levelDetail:
+		m.level = levelWork
+	case levelWork:
+		if m.showProjects {
+			m.level = levelProjects
+		}
+	}
+	return m, nil
+}
+
 // drillDown moves one navigation level deeper (projects → work → detail),
 // refreshing the detail pane. It is a no-op at the deepest level or when the
 // work level has no session to open.
 func (m Model) drillDown() (tea.Model, tea.Cmd) {
 	switch m.level {
 	case levelProjects:
+		m.showProjects = false
 		m.level = levelWork
+		m.layout()
 		return m, m.diffForSelection()
 	case levelWork:
 		if h, _ := m.currentDetail(); h == "" {
@@ -298,6 +356,10 @@ func (m Model) drillUp() (tea.Model, tea.Cmd) {
 	case levelDetail:
 		m.level = levelWork
 	case levelWork:
+		if !m.showProjects {
+			m.showProjects = true
+			m.layout()
+		}
 		m.level = levelProjects
 	}
 	return m, nil

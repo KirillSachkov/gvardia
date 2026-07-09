@@ -49,6 +49,8 @@ func run(args []string) error {
 		return runTasks(fs.Args()[1:], *configPath)
 	case "tools":
 		return runTools(fs.Args()[1:], *configPath)
+	case "run":
+		return runRun(fs.Args()[1:])
 	case "":
 		return runCockpit(*configPath)
 	default:

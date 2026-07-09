@@ -13,9 +13,13 @@ func TestRenderIncludesTaskProjectAndReportPath(t *testing.T) {
 			Title: "Build agent ops console",
 			Body:  "Add local runs and tmux launch.",
 		},
-		ProjectName: "gvardia",
-		ProjectPath: "/repo/gvardia",
-		ReportPath:  ".gvardia/runs/run-123/report.md",
+		ProjectName:  "gvardia",
+		ProjectPath:  "/repo/gvardia",
+		RunDir:       ".gvardia/runs/run-123",
+		ReportPath:   ".gvardia/runs/run-123/report.md",
+		StatusPath:   ".gvardia/runs/run-123/status.json",
+		EventsPath:   ".gvardia/runs/run-123/events.jsonl",
+		ArtifactsDir: ".gvardia/runs/run-123/artifacts",
 	})
 
 	for _, want := range []string{
@@ -23,6 +27,10 @@ func TestRenderIncludesTaskProjectAndReportPath(t *testing.T) {
 		"Add local runs and tmux launch.",
 		"Project: gvardia",
 		"/repo/gvardia",
+		".gvardia/runs/run-123",
+		"gvardia run status",
+		"gvardia run event",
+		"gvardia run artifact",
 		".gvardia/runs/run-123/report.md",
 		"inspect before editing",
 		"write final report",

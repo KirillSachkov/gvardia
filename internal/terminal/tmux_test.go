@@ -37,6 +37,37 @@ func TestTmuxLaunchBuildsDetachedSessionCommand(t *testing.T) {
 	}
 }
 
+func TestTmuxLaunchExportsRunEnvironment(t *testing.T) {
+	var calls []call
+	svc := TmuxService{
+		Runner: fakeRunner(func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+			calls = append(calls, call{dir: dir, name: name, args: args})
+			return nil, nil
+		}),
+	}
+
+	_, err := svc.Launch(context.Background(), LaunchSpec{
+		RunID:    "run-123",
+		Worktree: "/repo/gvardia-wt",
+		Command:  "claude /tmp/prompt.md",
+		Env: map[string]string{
+			"GVARDIA_RUN_DIR":     "/repo/.gvardia/runs/run-123",
+			"GVARDIA_REPORT_PATH": "/repo/.gvardia/runs/run-123/report.md",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(calls))
+	}
+	got := calls[0].args[len(calls[0].args)-1]
+	want := "export GVARDIA_REPORT_PATH='/repo/.gvardia/runs/run-123/report.md'; export GVARDIA_RUN_DIR='/repo/.gvardia/runs/run-123'; claude /tmp/prompt.md"
+	if got != want {
+		t.Fatalf("shell command = %q, want %q", got, want)
+	}
+}
+
 func TestTmuxAttachAndKillCommands(t *testing.T) {
 	var calls []call
 	svc := TmuxService{

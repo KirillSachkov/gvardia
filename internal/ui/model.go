@@ -77,6 +77,7 @@ type Model struct {
 	tools            []runners.Tool             // installed/missing agent tools
 	profiles         []runners.RunnerProfile    // runner profiles
 	activeTab        workTab                    // selected right-pane tab
+	showProjects     bool                       // whether the left projects drawer is visible
 	showActions      bool                       // true while contextual actions help is open
 
 	confirm    *confirmPrompt  // non-nil while a y/n confirmation is pending
@@ -113,6 +114,7 @@ func New(cfg config.Config) Model {
 		loading:          true,
 		runsView:         true,
 		activeTab:        tabAgents,
+		showProjects:     true,
 		historyByProject: make(map[string][]model.Session),
 		runsByProject:    make(map[string][]runs.Run),
 		profiles:         runners.Profiles(cfg),

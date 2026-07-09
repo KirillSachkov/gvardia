@@ -47,9 +47,9 @@ func TestTasksViewProjectScope(t *testing.T) {
 	m := readyWithTasks(t)
 	m, _ = step(m, keyText("t")) // tasks tab (alpha selected)
 	// scope on → only alpha's task remains visible
-	m, _ = step(m, keyText("p"))
+	m, _ = step(m, keyText("s"))
 	if !m.taskScope {
-		t.Fatal("p should enable project scope")
+		t.Fatal("s should enable project scope")
 	}
 	out := m.render()
 	if !strings.Contains(out, "Fix payment bug") {

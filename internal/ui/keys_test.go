@@ -12,7 +12,7 @@ import (
 
 func TestNormalizeKey(t *testing.T) {
 	cases := map[string]string{
-		"в": "d", "ф": "a", "к": "r", "н": "y", "т": "n", "ш": "i",
+		"в": "d", "ф": "a", "к": "r", "н": "y", "т": "n", "ш": "i", "з": "p", "ы": "s",
 		"К": "R", "Ч": "X", "Ф": "A", "С": "C", // uppercase → uppercase Latin
 		"d": "d", "R": "R", // already Latin passes through
 		"enter": "enter", "esc": "esc", "tab": "tab", "backspace": "backspace",

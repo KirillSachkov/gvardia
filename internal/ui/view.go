@@ -43,9 +43,9 @@ var (
 
 // geo holds the derived pane geometry for the current terminal size.
 type geo struct {
-	leftInnerW, leftInnerH int
-	rightInnerW            int
-	sessInnerH, diffInnerH int
+	leftOuterW, leftInnerW, leftInnerH int
+	rightInnerW                        int
+	sessInnerH, diffInnerH             int
 }
 
 // geometry derives pane sizes from the terminal dimensions. It is the single
@@ -62,11 +62,14 @@ func (m Model) geometry() geo {
 	if leftW > m.width-20 {
 		leftW = m.width - 20
 	}
+	if !m.showProjects {
+		leftW = 0
+	}
 	rightW := m.width - leftW
 	sessH := bodyH / 2
 
 	return geo{
-		leftInnerW: max1(leftW - 2), leftInnerH: max1(bodyH - 2),
+		leftOuterW: leftW, leftInnerW: max1(leftW - 2), leftInnerH: max1(bodyH - 2),
 		rightInnerW: max1(rightW - 2),
 		sessInnerH:  max1(sessH - 2), diffInnerH: max1(bodyH - sessH - 2),
 	}
@@ -90,11 +93,14 @@ func (m Model) render() string {
 			lipgloss.Center, lipgloss.Center, "collecting fleet…")
 	}
 
-	left := pane(m.level == levelProjects, m.projList.View())
 	sess := pane(m.level == levelWork, m.workPaneView())
 	diff := pane(m.level == levelDetail || m.showActions, m.detailPaneView())
 	right := lipgloss.JoinVertical(lipgloss.Left, sess, diff)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	body := right
+	if m.showProjects {
+		left := pane(m.level == levelProjects, m.projList.View())
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.statusLine(), m.footer())
 }
@@ -202,7 +208,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history · enter open · / filter · ? actions · q"
+	keys := "1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history · tab/←→ pane · enter open · / filter · ? actions · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
@@ -226,15 +232,15 @@ func (m Model) contextFooter() string {
 	base := "1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history"
 	switch m.activeTab {
 	case tabTasks:
-		return base + " · enter detail · n launch · p scope · / filter · ? actions"
+		return base + " · tab/←→ pane · p projects · s scope · n launch · / filter · ? actions"
 	case tabWorktrees:
-		return base + " · enter detail · d diff · g gc · ? actions"
+		return base + " · tab/←→ pane · p projects · d diff · g gc · ? actions"
 	case tabTools:
-		return base + " · enter detail · / filter · R refresh · ? actions"
+		return base + " · tab/←→ pane · p projects · / filter · R refresh · ? actions"
 	case tabHistory:
-		return base + " · enter detail · d diff · a attach · ? actions"
+		return base + " · tab/←→ pane · p projects · d diff · a attach · ? actions"
 	default:
-		return base + " · enter detail · a attach · d diff · o report · n launch · ? actions"
+		return base + " · tab/←→ pane · p projects · a attach · d diff · o report · n launch · ? actions"
 	}
 }
 
@@ -242,13 +248,16 @@ func (m Model) actionsHelp() string {
 	var b strings.Builder
 	b.WriteString("Actions\n\n")
 	b.WriteString("1..5  switch tabs\n")
-	b.WriteString("enter drill into selected item, esc goes back\n")
+	b.WriteString("tab    cycle panes\n")
+	b.WriteString("←/→    move focus between panes\n")
+	b.WriteString("enter  open selected pane/item, esc goes back\n")
+	b.WriteString("p      show/hide projects drawer\n")
 	b.WriteString("/      filter current context\n")
 	b.WriteString("R      refresh\n")
 	b.WriteString("n      launch selected project task with a runner profile\n")
 	switch m.activeTab {
 	case tabTasks:
-		b.WriteString("p      toggle all tasks / selected project scope\n")
+		b.WriteString("s      toggle all tasks / selected project scope\n")
 		b.WriteString("n      launch a run from this project\n")
 	case tabWorktrees:
 		b.WriteString("d      open lazygit/git diff for selected worktree\n")
@@ -342,27 +351,106 @@ func sessionDetail(s model.Session) string {
 func runDetail(r runs.Run) string {
 	title := r.TaskTitle
 	if title == "" {
-		title = "(no task)"
+		title = "Manual objective"
 	}
-	meta := fmt.Sprintf("%s · %s/%s · %s · %s",
-		r.Status, r.Runner, r.Tool, r.Branch, relativeTime(r.UpdatedAt))
 	var b strings.Builder
-	b.WriteString(title + "\n" + dim.Render(meta))
+	b.WriteString("Objective\n")
+	b.WriteString(title + "\n")
+	b.WriteString(dim.Render(fmt.Sprintf("State: %s · Agent: %s (%s) · Updated %s",
+		readableRunStatus(r.Status), valueOr(r.Runner, "unknown"), valueOr(r.Tool, "unknown"), valueOr(relativeTime(r.UpdatedAt), "unknown"))))
+	if r.Telemetry.Phase != "" || r.Telemetry.Summary != "" {
+		phase := valueOr(r.Telemetry.Phase, "current")
+		summary := valueOr(r.Telemetry.Summary, "No summary yet")
+		b.WriteString("\n" + dim.Render("Now: ") + phase + " - " + summary)
+	}
+	if r.Branch != "" {
+		b.WriteString("\n" + dim.Render("Branch: ") + r.Branch)
+	}
 	if r.TmuxTarget != "" {
-		b.WriteString("\n" + dim.Render("tmux ") + r.TmuxTarget)
+		b.WriteString("\n" + dim.Render("Terminal: ") + r.TmuxTarget)
 	}
 	if r.WorktreePath != "" {
-		b.WriteString("\n" + dim.Render("worktree ") + r.WorktreePath)
+		b.WriteString("\n" + dim.Render("Worktree: ") + r.WorktreePath)
 	}
+
 	if r.Report != "" {
-		b.WriteString("\n\n" + dim.Render("report") + "\n" + r.Report)
+		b.WriteString("\n\nLatest report\n" + r.Report)
 	} else {
-		b.WriteString("\n\n" + dim.Render("report") + "\nreport.md not written yet")
+		b.WriteString("\n\nLatest report\n" + dim.Render("No final report yet. Agents should write report.md or run gvardia run report."))
+	}
+
+	b.WriteString("\n\nEvidence\n")
+	b.WriteString(runEvidenceBlock(r))
+
+	b.WriteString("\n\nActivity\n")
+	b.WriteString(runEventsBlock(r.Events))
+	return b.String()
+}
+
+func readableRunStatus(status runs.Status) string {
+	switch status {
+	case runs.StatusRunning:
+		return "Running"
+	case runs.StatusReview:
+		return "Needs review"
+	case runs.StatusDone:
+		return "Done"
+	case runs.StatusFailed:
+		return "Failed"
+	case runs.StatusKilled:
+		return "Killed"
+	case runs.StatusPending:
+		return "Queued"
+	default:
+		return "Unknown"
+	}
+}
+
+func runEventsBlock(events []runs.Event) string {
+	if len(events) == 0 {
+		return dim.Render("No activity events yet.")
+	}
+	const cap = 6
+	start := 0
+	if len(events) > cap {
+		start = len(events) - cap
+	}
+	var b strings.Builder
+	for _, event := range events[start:] {
+		kind := valueOr(event.Type, "event")
+		msg := valueOr(event.Message, "(empty)")
+		b.WriteString(fmt.Sprintf("- %s: %s\n", kind, msg))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func runEvidenceBlock(r runs.Run) string {
+	var b strings.Builder
+	if r.Report != "" {
+		b.WriteString("- report: report.md\n")
+	} else {
+		b.WriteString("- report: not written yet\n")
+	}
+	for _, artifact := range r.RunArtifacts {
+		if artifact.Type == "report" && artifact.Path == "report.md" {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("- %s: %s (%s)\n", valueOr(artifact.Type, "artifact"), valueOr(artifact.Title, artifact.Path), artifact.Path))
 	}
 	if len(r.Artifacts) > 0 {
-		b.WriteString("\n\n" + artifactsBlock(r.Artifacts))
+		b.WriteString(fmt.Sprintf("- diff: %d files changed", len(r.Artifacts)))
+		shown := len(r.Artifacts)
+		if shown > 5 {
+			shown = 5
+		}
+		for i := 0; i < shown; i++ {
+			b.WriteString(fmt.Sprintf("\n  %s %s", r.Artifacts[i].Status, r.Artifacts[i].Path))
+		}
+		if len(r.Artifacts) > shown {
+			b.WriteString(fmt.Sprintf("\n  ...and %d more", len(r.Artifacts)-shown))
+		}
 	}
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func taskDetail(t model.Task) string {
