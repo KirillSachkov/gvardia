@@ -48,7 +48,21 @@ Gvardia evidence protocol:
 - Use gvardia run event --type status --message "<what changed>" for important activity.
 - Use gvardia run artifact --type plan --title "<title>" --file <path> for useful plans, notes, audits, logs, or review material.
 - Write the final report to the required report path, or run gvardia run report --file <path>.
+- Create a follow-up task only when useful with gvardia task create --title "<title>" --project "%s" --body "<body>".
 - Choose your own internal workflow, skills, and subagents; Gvardia only observes the work envelope.
+
+Final report format:
+## Summary
+What was completed.
+
+## Changes
+Files or behavior changed.
+
+## Verification
+Exact checks run and their outcomes.
+
+## Risks / Next steps
+Known gaps, review notes, or follow-up work. Write "None" when empty.
 
 Work requirements:
 - inspect before editing;
@@ -68,6 +82,7 @@ Work requirements:
 		fallback(ctx.StatusPath, ".gvardia/runs/<run-id>/status.json"),
 		fallback(ctx.EventsPath, ".gvardia/runs/<run-id>/events.jsonl"),
 		fallback(ctx.ArtifactsDir, ".gvardia/runs/<run-id>/artifacts"),
+		fallback(ctx.ProjectName, "project"),
 	)) + "\n"
 }
 

@@ -34,6 +34,11 @@ func TestRenderIncludesTaskProjectAndReportPath(t *testing.T) {
 		".gvardia/runs/run-123/report.md",
 		"inspect before editing",
 		"write final report",
+		"## Summary",
+		"## Changes",
+		"## Verification",
+		"## Risks / Next steps",
+		"gvardia task create",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Render missing %q:\n%s", want, got)

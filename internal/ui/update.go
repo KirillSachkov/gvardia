@@ -60,11 +60,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(collectFleet(m.cfg), m.diffForSelection())
 
 	case runLaunchedMsg:
-		m.toast = "launched " + msg.run.ID + " in tmux"
+		if msg.launchErr != nil {
+			m.banner = msg.launchErr.Error()
+			m.toast = "recorded failed launch " + msg.run.ID
+		} else {
+			m.toast = "launched " + msg.run.ID + " in tmux"
+		}
 		m.activeTab = tabAgents
 		m.runsView = true
 		m.worktreeView = false
-		return m, tea.Batch(collectFleet(m.cfg), m.diffForSelection())
+		var terminalCmd tea.Cmd
+		if msg.launchErr == nil && m.cfg.Terminal.OpenOnLaunch {
+			terminalCmd = attachRun(msg.run, m.cfg)
+		}
+		return m, tea.Batch(collectFleet(m.cfg), m.diffForSelection(), terminalCmd)
+
+	case terminalOpenedMsg:
+		m.toast = "opened " + msg.label + " in cmux"
+		m.banner = ""
+		return m, nil
+
+	case terminalFallbackMsg:
+		m.toast = "copied attach command - paste in a terminal"
+		if msg.err != nil {
+			m.banner = msg.err.Error()
+		}
+		return m, tea.SetClipboard(msg.command)
 
 	case spawnMsg:
 		return m, spawnHarness(msg.harness, msg.dir)
@@ -203,10 +224,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.switchTab(tabWorktrees)
 	case "a":
 		if r := m.selectedRun(); r != nil {
-			return m, attachRun(*r)
+			return m, attachRun(*r, m.cfg)
 		}
 		if s := m.selectedSession(); s != nil {
-			return m, attachSession(*s)
+			return m, attachSession(*s, m.cfg)
 		}
 		return m, nil
 	case "r":
@@ -399,10 +420,10 @@ func (m Model) runSelectedAction() (tea.Model, tea.Cmd) {
 		return m, m.diffForSelection()
 	case actionAttach:
 		if r := m.selectedRun(); r != nil {
-			return m, attachRun(*r)
+			return m, attachRun(*r, m.cfg)
 		}
 		if s := m.selectedSession(); s != nil {
-			return m, attachSession(*s)
+			return m, attachSession(*s, m.cfg)
 		}
 	case actionOpenDiff:
 		if w := m.selectionWorktree(); w != nil {

@@ -59,7 +59,38 @@ type diffMsg struct {
 	content string
 }
 
-type runLaunchedMsg struct{ run runs.Run }
+type runLaunchedMsg struct {
+	run       runs.Run
+	launchErr error
+}
+
+type terminalFallbackMsg struct {
+	command string
+	err     error
+}
+
+type terminalOpenedMsg struct{ label string }
+
+func newRunID(now time.Time) string {
+	now = now.UTC()
+	return fmt.Sprintf("run-%s-%06d", now.Format("20060102-150405"), now.Nanosecond()/1000)
+}
+
+func reconciledRunStatus(run runs.Run, pane terminal.PaneState, inspectErr error) (runs.Status, string) {
+	if run.Status != runs.StatusRunning && run.Status != runs.StatusPending {
+		return run.Status, ""
+	}
+	if inspectErr == nil && pane.Alive {
+		return runs.StatusRunning, "Agent pane is running"
+	}
+	if strings.TrimSpace(run.Report) != "" {
+		return runs.StatusReview, "Agent exited and produced a report"
+	}
+	if inspectErr != nil {
+		return runs.StatusFailed, "Agent session is unavailable: " + inspectErr.Error()
+	}
+	return runs.StatusFailed, fmt.Sprintf("Agent exited without a report (exit %d)", pane.ExitCode)
+}
 
 // collectFleet runs the collectors and adapters and joins them. It is pure I/O,
 // safe to run inside a tea.Cmd.
@@ -87,12 +118,15 @@ func collectFleet(cfg config.Config) tea.Cmd {
 		attachSummaries(ctx, hist, projects)
 		attachReports(ctx, hist, projects)
 
-		taskList := tasks.Load(ctx, cfg.Brain)
+		taskList := loadConfiguredTasks(ctx, cfg)
 		runMap := make(map[string][]runs.Run, len(projects))
-		store := runs.Store{}
+		store := runs.Store{Root: cfg.DataDir}
 		for _, p := range projects {
-			taskList = append(taskList, tasks.LoadLocal(ctx, p.Path)...)
-			if projectRuns, err := store.LoadProject(p.Path); err == nil {
+			projectRuns, _ := store.LoadProject(p.Path)
+			legacyRuns, _ := (runs.Store{}).LoadProject(p.Path)
+			projectRuns = mergeRuns(projectRuns, legacyRuns)
+			projectRuns = reconcileRuns(ctx, projectRuns)
+			if len(projectRuns) > 0 {
 				base := cfg.BaseBranch(p.Name)
 				if len(p.Worktrees) > 0 && p.Worktrees[0].BaseBranch != "" {
 					base = p.Worktrees[0].BaseBranch
@@ -107,6 +141,56 @@ func collectFleet(cfg config.Config) tea.Cmd {
 			tools: runners.DiscoverTools(cfg, exec.LookPath), profiles: runners.Profiles(cfg),
 		}
 	}
+}
+
+func loadConfiguredTasks(ctx context.Context, cfg config.Config) []model.Task {
+	var out []model.Task
+	for _, source := range cfg.TaskSources {
+		switch source {
+		case "gvardia":
+			out = append(out, tasks.LoadGvardia(ctx, cfg.DataDir)...)
+		case "brain":
+			out = append(out, tasks.Load(ctx, cfg.Brain)...)
+		}
+	}
+	return out
+}
+
+func mergeRuns(primary, legacy []runs.Run) []runs.Run {
+	seen := make(map[string]bool, len(primary)+len(legacy))
+	out := make([]runs.Run, 0, len(primary)+len(legacy))
+	for _, list := range [][]runs.Run{primary, legacy} {
+		for _, run := range list {
+			if seen[run.ID] {
+				continue
+			}
+			seen[run.ID] = true
+			out = append(out, run)
+		}
+	}
+	return out
+}
+
+func reconcileRuns(ctx context.Context, list []runs.Run) []runs.Run {
+	tmux := terminal.TmuxService{}
+	store := runs.Store{}
+	for i := range list {
+		if list[i].Status != runs.StatusRunning && list[i].Status != runs.StatusPending {
+			continue
+		}
+		pane, inspectErr := tmux.Inspect(ctx, list[i].TmuxTarget)
+		status, summary := reconciledRunStatus(list[i], pane, inspectErr)
+		if status == list[i].Status {
+			continue
+		}
+		list[i].Status = status
+		_ = store.WriteStatus(list[i].Dir(), runs.TelemetryStatus{
+			State: status, Phase: "reconciled", Summary: summary, NeedsReview: status != runs.StatusRunning,
+		})
+		_ = store.AppendEvent(list[i].Dir(), runs.Event{Type: "lifecycle", Message: summary})
+		_ = store.Save(list[i])
+	}
+	return list
 }
 
 // addTracked appends path to the curated list (deduplicated) and persists it.
@@ -266,8 +350,18 @@ func sessionExec(s model.Session, attach bool) *exec.Cmd {
 	}
 }
 
-// attachSession hands the terminal to the selected session (tmux-attach aware).
-func attachSession(s model.Session) tea.Cmd { return execOrBanner(sessionExec(s, true)) }
+// attachSession opens a new presentation workspace for the selected session.
+func attachSession(s model.Session, cfg config.Config) tea.Cmd {
+	command := handoffCommand(s)
+	if command == "" {
+		return func() tea.Msg { return errMsg{errors.New("no attachable session here")} }
+	}
+	dir := s.WorktreePath
+	if dir == "" {
+		dir = s.Cwd
+	}
+	return openTerminal(valueOr(s.Name, s.Harness), dir, command, cfg)
+}
 
 // handoffCommand builds a shell command that resumes the session in another
 // terminal (cd into its worktree, then the harness resume). Returns "" when the
@@ -339,17 +433,40 @@ func killSession(pid int) tea.Cmd {
 	}
 }
 
-func attachRun(r runs.Run) tea.Cmd {
+func attachRun(r runs.Run, cfg config.Config) tea.Cmd {
 	if r.TmuxTarget == "" {
 		return func() tea.Msg { return errMsg{errors.New("run has no tmux target")} }
 	}
-	cmd := exec.Command("tmux", "attach", "-t", r.TmuxTarget)
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		if err != nil {
-			return errMsg{fmt.Errorf("attach run: %w", err)}
+	return openTerminal(valueOr(r.TaskTitle, r.ID), r.WorktreePath, terminal.AttachCommand(r.TmuxTarget), cfg)
+}
+
+func openTerminal(label, dir, command string, cfg config.Config) tea.Cmd {
+	return func() tea.Msg {
+		if command == "" {
+			return errMsg{errors.New("terminal command is required")}
 		}
-		return execDoneMsg{}
-	})
+		backend := cfg.Terminal.Backend
+		if backend == "" {
+			backend = "auto"
+		}
+		if backend == "copy" {
+			return terminalFallbackMsg{command: command}
+		}
+		if backend != "auto" && backend != "cmux" {
+			return terminalFallbackMsg{command: command, err: fmt.Errorf("unknown terminal backend %q", backend)}
+		}
+		if _, err := exec.LookPath("cmux"); err != nil {
+			return terminalFallbackMsg{command: command, err: errors.New("cmux is unavailable")}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		if err := (terminal.CmuxService{}).Open(ctx, terminal.OpenSpec{
+			Name: label, Cwd: dir, Command: command, Focus: cfg.Terminal.FocusNew,
+		}); err != nil {
+			return terminalFallbackMsg{command: command, err: err}
+		}
+		return terminalOpenedMsg{label: label}
+	}
 }
 
 func killRun(r runs.Run) tea.Cmd {
@@ -374,7 +491,7 @@ func killRun(r runs.Run) tea.Cmd {
 	}
 }
 
-func launchRun(project model.Project, task model.Task, profile runners.RunnerProfile) tea.Cmd {
+func launchRun(project model.Project, task model.Task, profile runners.RunnerProfile, cfg config.Config) tea.Cmd {
 	return func() tea.Msg {
 		if err := runners.ValidateProfile(profile); err != nil {
 			return errMsg{err}
@@ -382,11 +499,11 @@ func launchRun(project model.Project, task model.Task, profile runners.RunnerPro
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		id := "run-" + time.Now().UTC().Format("20060102-150405")
+		id := newRunID(time.Now())
 		branch := "gvardia/" + id
 		worktree := filepath.Join(filepath.Dir(project.Path), project.Name+"-"+id)
 		target := "gvardia-" + id
-		runDir := filepath.Join(project.Path, ".gvardia", "runs", id)
+		runDir := filepath.Join(cfg.DataDir, "runs", id)
 		reportPath := filepath.Join(runDir, "report.md")
 
 		add := exec.CommandContext(ctx, "git", "-C", project.Path, "worktree", "add", "-b", branch, worktree)
@@ -394,7 +511,7 @@ func launchRun(project model.Project, task model.Task, profile runners.RunnerPro
 			return errMsg{fmt.Errorf("git worktree add: %w: %s", err, strings.TrimSpace(string(out)))}
 		}
 
-		store := runs.Store{NewID: func() string { return id }}
+		store := runs.Store{Root: cfg.DataDir, NewID: func() string { return id }}
 		prompt := prompts.Render(prompts.Context{
 			Task:         task,
 			ProjectName:  project.Name,
@@ -423,15 +540,25 @@ func launchRun(project model.Project, task model.Task, profile runners.RunnerPro
 			run.Status = runs.StatusFailed
 			_ = store.WriteStatus(run.Dir(), runs.TelemetryStatus{State: runs.StatusFailed, Phase: "launch", Summary: err.Error(), NeedsReview: true})
 			_ = store.Save(run)
-			return errMsg{err}
+			return runLaunchedMsg{run: run, launchErr: err}
 		}
-		run.Status = runs.StatusRunning
-		if err := store.WriteStatus(run.Dir(), runs.TelemetryStatus{State: runs.StatusRunning, Phase: "launched", Summary: "Agent launched in tmux"}); err != nil {
+		pane, inspectErr := (terminal.TmuxService{}).Inspect(ctx, target)
+		status, summary := reconciledRunStatus(run, pane, inspectErr)
+		run.Status = status
+		if status == runs.StatusRunning {
+			summary = "Agent launched in tmux"
+		}
+		if err := store.WriteStatus(run.Dir(), runs.TelemetryStatus{
+			State: status, Phase: "launched", Summary: summary, NeedsReview: status != runs.StatusRunning,
+		}); err != nil {
 			return errMsg{err}
 		}
 		_ = store.AppendEvent(run.Dir(), runs.Event{Type: "launch", Message: "Agent launched in " + target})
 		if err := store.Save(run); err != nil {
 			return errMsg{err}
+		}
+		if status != runs.StatusRunning {
+			return runLaunchedMsg{run: run, launchErr: errors.New(summary)}
 		}
 		return runLaunchedMsg{run: run}
 	}

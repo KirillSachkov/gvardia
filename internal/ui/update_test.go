@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +144,17 @@ func TestQuitKey(t *testing.T) {
 	}
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Error("q command should produce tea.QuitMsg")
+	}
+}
+
+func TestTerminalFallbackCopiesAttachCommand(t *testing.T) {
+	m := ready(t)
+	m, cmd := step(m, terminalFallbackMsg{command: "tmux attach -t run-1", err: errors.New("cmux unavailable")})
+	if cmd == nil {
+		t.Fatal("terminal fallback should return clipboard command")
+	}
+	if !strings.Contains(m.toast, "copied attach command") || !strings.Contains(m.banner, "cmux unavailable") {
+		t.Fatalf("toast/banner = %q/%q, want copy notice and cmux error", m.toast, m.banner)
 	}
 }
 

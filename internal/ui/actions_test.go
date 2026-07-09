@@ -89,6 +89,9 @@ func TestLaunchPrompt(t *testing.T) {
 	if len(m.launch.tasks) != 1 || m.launch.tasks[0].Title != "Alpha task" {
 		t.Fatalf("launch tasks = %+v, want alpha-scoped task", m.launch.tasks)
 	}
+	if got := m.profiles[m.launch.profileIdx].Name; got != "codex" {
+		t.Fatalf("default launch runner = %q, want codex", got)
+	}
 	firstRunner := m.profiles[m.launch.profileIdx].Name
 	m, _ = step(m, keyPress(tea.KeyTab))
 	if m.profiles[m.launch.profileIdx].Name == firstRunner {

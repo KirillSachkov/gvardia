@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/runners"
 )
 
 // confirmPrompt is a pending yes/no confirmation guarding a destructive action.
@@ -156,7 +157,7 @@ func (m Model) handleLaunchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		task := m.launch.tasks[m.launch.taskIdx]
 		profile := m.profiles[m.launch.profileIdx]
 		m.launch = nil
-		return m, launchRun(*p, task, profile)
+		return m, launchRun(*p, task, profile, m.cfg)
 	}
 	return m, nil
 }
@@ -288,7 +289,8 @@ func (m *Model) openLaunchPrompt() tea.Cmd {
 	if len(scoped) == 0 {
 		scoped = append(scoped, model.Task{ID: "ad-hoc", Title: "Ad-hoc run", Status: "inbox", Project: p.Name, Body: "Inspect the project and write a plan before editing.", Source: "local"})
 	}
-	m.launch = &launchPrompt{tasks: scoped}
+	_, profileIdx := runners.DefaultProfile(m.profiles, m.cfg.DefaultRunner)
+	m.launch = &launchPrompt{tasks: scoped, profileIdx: profileIdx}
 	return nil
 }
 
