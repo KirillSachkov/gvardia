@@ -59,6 +59,19 @@ func TestRunsViewShowsRunsAndReport(t *testing.T) {
 	}
 }
 
+func TestRunsViewSplitsSummaryReportAndArtifactsIntoSeparatePanes(t *testing.T) {
+	m := readyWithRuns(t)
+	out := m.render()
+	for _, want := range []string{"Summary", "Report", "Artifacts", "Build ops console", "REPORT_READY", "Implementation plan"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("split detail layout missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Objective\nBuild ops console") {
+		t.Fatalf("run detail should not be rendered as one raw block anymore:\n%s", out)
+	}
+}
+
 func TestRunDetailSummarizesReportInsteadOfDumpingRawMarkdown(t *testing.T) {
 	detail := runDetail(runs.Run{
 		ID: "run-2", TaskTitle: "Readable report", Runner: "claude", Tool: "claude",

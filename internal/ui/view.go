@@ -105,12 +105,15 @@ func (m Model) render() string {
 
 	g := m.geometry()
 	sess := pane(m.level == levelWork, g.rightOuterW, g.sessOuterH, m.workPaneView())
-	diff := pane(m.level == levelDetail || m.showActions, g.rightOuterW, g.diffOuterH, m.detailPaneView())
-	right := lipgloss.JoinVertical(lipgloss.Left, sess, diff)
+	detail := m.detailPanesView(g.rightOuterW, g.diffOuterH)
+	right := lipgloss.JoinVertical(lipgloss.Left, sess, detail)
 	body := right
 	if m.showProjects {
 		left := pane(m.level == levelProjects, g.leftOuterW, g.bodyH, m.projList.View())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	}
+	if m.showActions {
+		body = m.renderModalOverlay(body, g)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.statusLine(), m.footer())
@@ -159,10 +162,160 @@ func (m Model) activeTabLabel() string {
 }
 
 func (m Model) detailPaneView() string {
-	if m.showActions {
-		return m.actionsHelp()
-	}
 	return m.diff.View()
+}
+
+type detailParts struct {
+	summary   string
+	report    string
+	artifacts string
+}
+
+func (m Model) detailPanesView(width, height int) string {
+	parts := m.detailParts()
+	if width < 90 {
+		summaryH := max1(height / 3)
+		reportH := max1((height - summaryH) / 2)
+		artifactsH := max1(height - summaryH - reportH)
+		return lipgloss.JoinVertical(lipgloss.Left,
+			pane(m.level == levelDetail, width, summaryH, titledBlock("Summary", parts.summary)),
+			pane(false, width, reportH, titledBlock("Report", parts.report)),
+			pane(false, width, artifactsH, titledBlock("Artifacts", parts.artifacts)),
+		)
+	}
+
+	topH := height * 42 / 100
+	if topH < 6 {
+		topH = 6
+	}
+	if topH > height-5 {
+		topH = height - 5
+	}
+	topH = max1(topH)
+	artifactsH := max1(height - topH)
+	summaryW := width / 2
+	reportW := width - summaryW
+	top := lipgloss.JoinHorizontal(lipgloss.Top,
+		pane(m.level == levelDetail, summaryW, topH, titledBlock("Summary", parts.summary)),
+		pane(false, reportW, topH, titledBlock("Report", parts.report)),
+	)
+	return lipgloss.JoinVertical(lipgloss.Left,
+		top,
+		pane(false, width, artifactsH, titledBlock("Artifacts", parts.artifacts)),
+	)
+}
+
+func titledBlock(title, body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		body = dim.Render("Nothing to show yet.")
+	}
+	return title + "\n" + body
+}
+
+func (m Model) detailParts() detailParts {
+	if t := m.selectedTask(); t != nil {
+		return detailParts{
+			summary:   taskSummary(*t),
+			report:    dim.Render("No report yet. Launch a run for this task to collect one."),
+			artifacts: dim.Render("No artifacts yet. A launched run will write evidence here."),
+		}
+	}
+	if tool := m.selectedTool(); tool != nil {
+		return detailParts{
+			summary:   toolDetail(*tool),
+			report:    dim.Render("Tools do not produce reports directly."),
+			artifacts: runnerProfileBlock(*tool, m.profiles),
+		}
+	}
+	if r := m.selectedRun(); r != nil {
+		return detailParts{
+			summary:   runSummary(*r),
+			report:    runReportBlock(*r),
+			artifacts: runArtifactsPane(*r, m.diff.View()),
+		}
+	}
+	if m.activeTab == tabWorktrees {
+		w := m.selectedWorktree()
+		if w == nil {
+			return emptyDetailParts(m.selectedProject())
+		}
+		report := dim.Render("No agent report is attached to this worktree.")
+		if s := m.selectedSession(); s != nil && s.Report != "" {
+			report = reportSummary(s.Report)
+		}
+		return detailParts{
+			summary:   worktreeHeader(*w),
+			report:    report,
+			artifacts: worktreeArtifactsPane(*w, m.diff.View()),
+		}
+	}
+	if s := m.selectedSession(); s != nil {
+		return detailParts{
+			summary:   detailHeader(*s),
+			report:    sessionReportBlock(*s),
+			artifacts: sessionArtifactsPane(*s, m.diff.View()),
+		}
+	}
+	return emptyDetailParts(m.selectedProject())
+}
+
+func emptyDetailParts(p *model.Project) detailParts {
+	return detailParts{
+		summary:   emptyDetail(p),
+		report:    dim.Render("Select a run or agent with a report."),
+		artifacts: dim.Render("Select a run, worktree, or agent to see evidence."),
+	}
+}
+
+func (m Model) renderModalOverlay(body string, g geo) string {
+	modalW := m.width * 52 / 100
+	if modalW < 46 {
+		modalW = 46
+	}
+	if modalW > m.width-4 {
+		modalW = m.width - 4
+	}
+	modalH := g.bodyH * 55 / 100
+	if modalH < 10 {
+		modalH = 10
+	}
+	if modalH > g.bodyH-2 {
+		modalH = g.bodyH - 2
+	}
+	modalW, modalH = max1(modalW), max1(modalH)
+	modal := pane(true, modalW, modalH, m.actionsHelp())
+	x := max1((m.width - modalW) / 2)
+	y := max1((g.bodyH - modalH) / 2)
+	return overlayBlock(body, modal, x, y, m.width, g.bodyH)
+}
+
+func overlayBlock(base, overlay string, x, y, width, height int) string {
+	baseLines := strings.Split(base, "\n")
+	for len(baseLines) < height {
+		baseLines = append(baseLines, "")
+	}
+	if len(baseLines) > height {
+		baseLines = baseLines[:height]
+	}
+	overlayLines := strings.Split(overlay, "\n")
+	for i, overlayLine := range overlayLines {
+		row := y + i
+		if row < 0 || row >= len(baseLines) {
+			continue
+		}
+		overlayW := lipgloss.Width(overlayLine)
+		left := ansi.Cut(baseLines[row], 0, x)
+		right := ansi.Cut(baseLines[row], x+overlayW, width)
+		baseLines[row] = left + overlayLine + right
+	}
+	for i := range baseLines {
+		baseLines[i] = ansi.Truncate(baseLines[i], width, "")
+		if w := lipgloss.Width(baseLines[i]); w < width {
+			baseLines[i] += strings.Repeat(" ", width-w)
+		}
+	}
+	return strings.Join(baseLines, "\n")
 }
 
 // pane wraps content in a fixed-size rounded border, brighter when focused.
@@ -442,6 +595,121 @@ func runDetail(r runs.Run) string {
 	b.WriteString("\n\nActivity\n")
 	b.WriteString(runEventsBlock(r.Events))
 	return b.String()
+}
+
+func runSummary(r runs.Run) string {
+	title := valueOr(r.TaskTitle, "Manual objective")
+	var b strings.Builder
+	b.WriteString("Objective: " + title)
+	b.WriteString("\n" + dim.Render(fmt.Sprintf("State: %s · Runner: %s · Tool: %s",
+		readableRunStatus(r.Status), valueOr(r.Runner, "unknown"), valueOr(r.Tool, "unknown"))))
+	if r.Telemetry.Phase != "" || r.Telemetry.Summary != "" {
+		phase := valueOr(r.Telemetry.Phase, "current")
+		summary := valueOr(r.Telemetry.Summary, "No summary yet")
+		b.WriteString("\n" + dim.Render("Now: ") + phase + " - " + summary)
+	}
+	if r.Branch != "" {
+		b.WriteString("\n" + dim.Render("Branch: ") + r.Branch)
+	}
+	if r.TmuxTarget != "" {
+		b.WriteString("\n" + dim.Render("Terminal: ") + r.TmuxTarget)
+	}
+	if r.WorktreePath != "" {
+		b.WriteString("\n" + dim.Render("Worktree: ") + r.WorktreePath)
+	}
+	if !r.UpdatedAt.IsZero() {
+		b.WriteString("\n" + dim.Render("Updated: ") + relativeTime(r.UpdatedAt))
+	}
+	return b.String()
+}
+
+func runReportBlock(r runs.Run) string {
+	if r.Report == "" {
+		return dim.Render("No final report yet. Agents should write report.md or run gvardia run report.")
+	}
+	return reportSummary(r.Report)
+}
+
+func runArtifactsPane(r runs.Run, diff string) string {
+	var sections []string
+	sections = append(sections, "Evidence\n"+runEvidenceBlock(r))
+	if events := runEventsBlock(r.Events); strings.TrimSpace(events) != "" {
+		sections = append(sections, "Activity\n"+events)
+	}
+	if strings.TrimSpace(diff) != "" {
+		sections = append(sections, "Diff\n"+strings.TrimSpace(diff))
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+func sessionReportBlock(s model.Session) string {
+	if s.Report == "" {
+		return dim.Render("No report found in this session transcript.")
+	}
+	return reportSummary(s.Report)
+}
+
+func sessionArtifactsPane(s model.Session, diff string) string {
+	var sections []string
+	if len(s.Artifacts) > 0 {
+		sections = append(sections, artifactsBlock(s.Artifacts))
+	}
+	if strings.TrimSpace(diff) != "" {
+		sections = append(sections, "Diff\n"+strings.TrimSpace(diff))
+	}
+	if len(sections) == 0 {
+		return dim.Render("No artifacts recorded yet.")
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+func worktreeArtifactsPane(w model.Worktree, diff string) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Changed files: %d", w.ChangeStat.Files))
+	if w.ChangeStat.Files > 0 {
+		b.WriteString(fmt.Sprintf(" · +%d -%d", w.ChangeStat.Added, w.ChangeStat.Removed))
+	}
+	if strings.TrimSpace(diff) != "" {
+		b.WriteString("\n\nDiff\n" + strings.TrimSpace(diff))
+	}
+	return b.String()
+}
+
+func taskSummary(t model.Task) string {
+	title := valueOr(t.Title, "(untitled task)")
+	meta := fmt.Sprintf("%s · %s · %s", valueOr(t.Status, "inbox"), valueOr(t.Project, "no project"), valueOr(t.ID, "no id"))
+	var b strings.Builder
+	b.WriteString(title + "\n" + dim.Render(meta))
+	if t.Source != "" {
+		b.WriteString("\n" + dim.Render("source ") + t.Source)
+	}
+	if t.Path != "" {
+		b.WriteString("\n" + dim.Render("path ") + t.Path)
+	}
+	if strings.TrimSpace(t.Body) != "" {
+		b.WriteString("\n\n" + strings.Join(limitNonEmpty(strings.Split(t.Body, "\n"), 6), "\n"))
+	}
+	return b.String()
+}
+
+func runnerProfileBlock(tool runners.Tool, profiles []runners.RunnerProfile) string {
+	var b strings.Builder
+	count := 0
+	for _, profile := range profiles {
+		if profile.Tool != tool.Name {
+			continue
+		}
+		count++
+		kind := "custom"
+		if profile.BuiltIn {
+			kind = "built-in"
+		}
+		b.WriteString(fmt.Sprintf("- %s (%s)\n", profile.Name, kind))
+	}
+	if count == 0 {
+		return dim.Render("No runner profiles use this tool.")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func reportSummary(report string) string {

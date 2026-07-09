@@ -46,11 +46,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case diffMsg:
-		header, _ := m.currentDetail()
-		if header != "" {
-			header += "\n\n"
-		}
-		m.diff.SetContent(header + msg.content)
+		m.diff.SetContent(msg.content)
 		m.diff.GotoTop()
 		return m, nil
 
@@ -684,20 +680,20 @@ func (m *Model) applyActiveFilter() {
 func (m *Model) diffForSelection() tea.Cmd {
 	header, w := m.currentDetail()
 	if header == "" {
-		m.diff.SetContent(emptyDetail(m.selectedProject()))
+		m.diff.SetContent("")
 		m.diff.GotoTop()
 		return nil
 	}
 	if w == nil {
-		content := header
+		content := ""
 		if m.activeTab == tabAgents || m.activeTab == tabHistory {
-			content += "\n\n" + dim.Render("No worktree is attached, so diff is unavailable.")
+			content = dim.Render("No worktree is attached, so diff is unavailable.")
 		}
 		m.diff.SetContent(content)
 		m.diff.GotoTop()
 		return nil
 	}
-	m.diff.SetContent(header + "\n\nloading diff…")
+	m.diff.SetContent("loading diff…")
 	m.diff.GotoTop()
 	return diffStat(w.Path, w.BaseBranch)
 }

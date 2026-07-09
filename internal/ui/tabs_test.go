@@ -164,6 +164,28 @@ func TestQuestionMarkShowsContextActions(t *testing.T) {
 	}
 }
 
+func TestActionsRenderAsModalOverlayNotDetailReplacement(t *testing.T) {
+	m := readyWithOpsData(t)
+	m.diff.SetContent("DETAIL_UNDERLAY_MARKER")
+	m.showActions = true
+	m.actionMenu = &actionMenu{
+		title: "Agent: a1",
+		items: []actionItem{{label: "Open details", hint: "Show details", kind: actionOpenDetails}},
+	}
+
+	if detail := m.detailPaneView(); !strings.Contains(detail, "DETAIL_UNDERLAY_MARKER") {
+		t.Fatalf("detail pane should keep its content under the modal, got:\n%s", detail)
+	}
+	if detail := m.detailPaneView(); strings.Contains(detail, "Actions") {
+		t.Fatalf("detail pane should not be replaced by actions, got:\n%s", detail)
+	}
+
+	out := m.render()
+	if !strings.Contains(out, "Actions - Agent: a1") {
+		t.Fatalf("render should show the actions modal:\n%s", out)
+	}
+}
+
 func TestContextActionMenuCanOpenDetail(t *testing.T) {
 	m := readyWithOpsData(t)
 	m, _ = step(m, keyPress(tea.KeyEnter)) // project -> work
