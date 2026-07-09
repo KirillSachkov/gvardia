@@ -7,6 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
 // confirmPrompt is a pending yes/no confirmation guarding a destructive action.
@@ -19,6 +21,12 @@ type confirmPrompt struct {
 type newAgentPrompt struct {
 	harness string
 	input   textinput.Model
+}
+
+type launchPrompt struct {
+	tasks      []model.Task
+	taskIdx    int
+	profileIdx int
 }
 
 // pathMode distinguishes the two project-curation prompts.
@@ -76,6 +84,54 @@ func (m Model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.prompt.input, cmd = m.prompt.input.Update(msg)
 	return m, cmd
+}
+
+func (m Model) handleLaunchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch normalizeKey(msg.String()) {
+	case "esc", "ctrl+c":
+		m.launch = nil
+		return m, nil
+	case "j", "down":
+		if len(m.launch.tasks) > 0 {
+			m.launch.taskIdx = (m.launch.taskIdx + 1) % len(m.launch.tasks)
+		}
+		return m, nil
+	case "k", "up":
+		if len(m.launch.tasks) > 0 {
+			m.launch.taskIdx--
+			if m.launch.taskIdx < 0 {
+				m.launch.taskIdx = len(m.launch.tasks) - 1
+			}
+		}
+		return m, nil
+	case "tab":
+		if len(m.profiles) > 0 {
+			m.launch.profileIdx = (m.launch.profileIdx + 1) % len(m.profiles)
+		}
+		return m, nil
+	case "enter":
+		p := m.selectedProject()
+		if p == nil {
+			m.launch = nil
+			m.banner = "select a project first"
+			return m, nil
+		}
+		if len(m.launch.tasks) == 0 {
+			m.launch = nil
+			m.banner = "no task selected"
+			return m, nil
+		}
+		if len(m.profiles) == 0 {
+			m.launch = nil
+			m.banner = "no runner profiles configured"
+			return m, nil
+		}
+		task := m.launch.tasks[m.launch.taskIdx]
+		profile := m.profiles[m.launch.profileIdx]
+		m.launch = nil
+		return m, launchRun(*p, task, profile)
+	}
+	return m, nil
 }
 
 // handlePathKey drives the add/create-project path form. The text input receives
@@ -137,6 +193,17 @@ func (m Model) confirmUntrack() (tea.Model, tea.Cmd) {
 // confirmKill opens a confirmation to SIGTERM the selected live session's
 // process. Ended (history) sessions have no PID and cannot be killed.
 func (m Model) confirmKill() (tea.Model, tea.Cmd) {
+	if r := m.selectedRun(); r != nil {
+		if r.TmuxTarget == "" {
+			m.banner = "run has no tmux target"
+			return m, nil
+		}
+		m.confirm = &confirmPrompt{
+			message: fmt.Sprintf("kill run %s (%s)?", r.ID, r.TmuxTarget),
+			action:  killRun(*r),
+		}
+		return m, nil
+	}
 	s := m.selectedSession()
 	if s == nil {
 		m.banner = "no session selected to kill"
@@ -173,6 +240,29 @@ func (m *Model) openNewAgentPrompt() tea.Cmd {
 	in.Placeholder = "agent name…"
 	m.prompt = &newAgentPrompt{harness: "claude", input: in}
 	return m.prompt.input.Focus()
+}
+
+func (m *Model) openLaunchPrompt() tea.Cmd {
+	p := m.selectedProject()
+	if p == nil {
+		m.banner = "select a project first"
+		return nil
+	}
+	var scoped []model.Task
+	for _, t := range m.tasks {
+		if t.Source == "local" && t.Project == p.Name {
+			scoped = append(scoped, t)
+			continue
+		}
+		if projectMatches(t.Project, p.Name) {
+			scoped = append(scoped, t)
+		}
+	}
+	if len(scoped) == 0 {
+		scoped = append(scoped, model.Task{ID: "ad-hoc", Title: "Ad-hoc run", Status: "inbox", Project: p.Name, Body: "Inspect the project and write a plan before editing.", Source: "local"})
+	}
+	m.launch = &launchPrompt{tasks: scoped}
+	return nil
 }
 
 // currentRoot returns the configured root that contains the selected project,

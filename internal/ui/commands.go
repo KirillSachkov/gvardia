@@ -17,7 +17,11 @@ import (
 	"github.com/KirillSachkov/gvardia/internal/config"
 	"github.com/KirillSachkov/gvardia/internal/history"
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/prompts"
+	"github.com/KirillSachkov/gvardia/internal/runners"
+	"github.com/KirillSachkov/gvardia/internal/runs"
 	"github.com/KirillSachkov/gvardia/internal/tasks"
+	"github.com/KirillSachkov/gvardia/internal/terminal"
 )
 
 // fleetMsg carries a completed collect+adapters+join pass. curated is true when
@@ -28,6 +32,9 @@ type fleetMsg struct {
 	failures []adapters.Failure
 	curated  bool
 	tasks    []model.Task
+	runs     map[string][]runs.Run
+	tools    []runners.Tool
+	profiles []runners.RunnerProfile
 }
 
 // projectsChangedMsg signals that the tracked project list was edited and the
@@ -51,6 +58,8 @@ type diffMsg struct {
 	path    string
 	content string
 }
+
+type runLaunchedMsg struct{ run runs.Run }
 
 // collectFleet runs the collectors and adapters and joins them. It is pure I/O,
 // safe to run inside a tea.Cmd.
@@ -79,8 +88,20 @@ func collectFleet(cfg config.Config) tea.Cmd {
 		attachReports(ctx, hist, projects)
 
 		taskList := tasks.Load(ctx, cfg.Brain)
+		runMap := make(map[string][]runs.Run, len(projects))
+		store := runs.Store{}
+		for _, p := range projects {
+			taskList = append(taskList, tasks.LoadLocal(ctx, p.Path)...)
+			if projectRuns, err := store.LoadProject(p.Path); err == nil {
+				runMap[p.Path] = projectRuns
+			}
+		}
 		tasks.LinkTasks(projects, taskList)
-		return fleetMsg{projects: projects, failures: failures, curated: curated, tasks: taskList}
+		return fleetMsg{
+			projects: projects, failures: failures, curated: curated,
+			tasks: taskList, runs: runMap,
+			tools: runners.DiscoverTools(cfg, exec.LookPath), profiles: runners.Profiles(cfg),
+		}
 	}
 }
 
@@ -311,6 +332,90 @@ func killSession(pid int) tea.Cmd {
 			return errMsg{fmt.Errorf("kill %d: %w", pid, err)}
 		}
 		return execDoneMsg{}
+	}
+}
+
+func attachRun(r runs.Run) tea.Cmd {
+	if r.TmuxTarget == "" {
+		return func() tea.Msg { return errMsg{errors.New("run has no tmux target")} }
+	}
+	cmd := exec.Command("tmux", "attach", "-t", r.TmuxTarget)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return errMsg{fmt.Errorf("attach run: %w", err)}
+		}
+		return execDoneMsg{}
+	})
+}
+
+func killRun(r runs.Run) tea.Cmd {
+	return func() tea.Msg {
+		if r.TmuxTarget == "" {
+			return errMsg{errors.New("run has no tmux target to kill")}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := (terminal.TmuxService{}).Kill(ctx, r.TmuxTarget); err != nil {
+			return errMsg{err}
+		}
+		r.Status = runs.StatusKilled
+		if err := (runs.Store{}).Save(r); err != nil {
+			return errMsg{err}
+		}
+		return execDoneMsg{}
+	}
+}
+
+func launchRun(project model.Project, task model.Task, profile runners.RunnerProfile) tea.Cmd {
+	return func() tea.Msg {
+		if err := runners.ValidateProfile(profile); err != nil {
+			return errMsg{err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		id := "run-" + time.Now().UTC().Format("20060102-150405")
+		branch := "gvardia/" + id
+		worktree := filepath.Join(filepath.Dir(project.Path), project.Name+"-"+id)
+		target := "gvardia-" + id
+
+		add := exec.CommandContext(ctx, "git", "-C", project.Path, "worktree", "add", "-b", branch, worktree)
+		if out, err := add.CombinedOutput(); err != nil {
+			return errMsg{fmt.Errorf("git worktree add: %w: %s", err, strings.TrimSpace(string(out)))}
+		}
+
+		store := runs.Store{NewID: func() string { return id }}
+		reportPath := filepath.Join(project.Path, ".gvardia", "runs", id, "report.md")
+		prompt := prompts.Render(prompts.Context{
+			Task:        task,
+			ProjectName: project.Name,
+			ProjectPath: project.Path,
+			ReportPath:  reportPath,
+		})
+		run, err := store.Create(project.Path, runs.CreateInput{
+			Project: project.Name, TaskID: task.ID, TaskTitle: task.Title,
+			Runner: profile.Name, Tool: profile.Tool,
+			WorktreePath: worktree, Branch: branch, Prompt: prompt, TmuxTarget: target,
+		})
+		if err != nil {
+			return errMsg{err}
+		}
+
+		command := runners.RenderCommand(profile, runners.CommandData{
+			PromptPath: run.PromptPath, WorktreePath: worktree, ReportPath: run.ReportPath, TaskTitle: task.Title,
+		})
+		if _, err := (terminal.TmuxService{}).Launch(ctx, terminal.LaunchSpec{
+			RunID: id, Worktree: worktree, Command: command, Target: target, WindowTitle: task.Title,
+		}); err != nil {
+			run.Status = runs.StatusFailed
+			_ = store.Save(run)
+			return errMsg{err}
+		}
+		run.Status = runs.StatusRunning
+		if err := store.Save(run); err != nil {
+			return errMsg{err}
+		}
+		return runLaunchedMsg{run: run}
 	}
 }
 

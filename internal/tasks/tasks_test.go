@@ -77,3 +77,55 @@ func TestLinkTasksIDWithoutHash(t *testing.T) {
 		t.Errorf("linked task = %q, want No-hash task", got)
 	}
 }
+
+func TestLoadLocalReadsProjectTasksWithBody(t *testing.T) {
+	project := t.TempDir()
+	dir := filepath.Join(project, ".gvardia", "tasks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nid: local-1\ntitle: Build ops console\nstatus: active\n---\n\nImplement local runs.\n"
+	if err := os.WriteFile(filepath.Join(dir, "local-1.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := LoadLocal(context.Background(), project)
+	if len(got) != 1 {
+		t.Fatalf("LoadLocal returned %d tasks, want 1: %+v", len(got), got)
+	}
+	task := got[0]
+	if task.ID != "local-1" || task.Title != "Build ops console" || task.Status != "active" {
+		t.Errorf("local task metadata = %+v, want parsed frontmatter", task)
+	}
+	if task.Project != filepath.Base(project) || task.Source != "local" {
+		t.Errorf("local task project/source = %q/%q, want %q/local", task.Project, task.Source, filepath.Base(project))
+	}
+	if task.Body != "Implement local runs." {
+		t.Errorf("local task body = %q, want body text", task.Body)
+	}
+}
+
+func TestCreateLocalWritesReloadableTask(t *testing.T) {
+	project := t.TempDir()
+
+	task, err := CreateLocal(project, model.Task{
+		ID:     "ops-console",
+		Title:  "Build ops console",
+		Status: "inbox",
+		Body:   "Make gvardia launch local agent runs.",
+	})
+	if err != nil {
+		t.Fatalf("CreateLocal: %v", err)
+	}
+	if task.Path == "" {
+		t.Fatal("CreateLocal returned empty Path")
+	}
+
+	got := LoadLocal(context.Background(), project)
+	if len(got) != 1 {
+		t.Fatalf("LoadLocal returned %d tasks, want 1", len(got))
+	}
+	if got[0].ID != "ops-console" || got[0].Body != "Make gvardia launch local agent runs." {
+		t.Errorf("reloaded task = %+v, want written task", got[0])
+	}
+}

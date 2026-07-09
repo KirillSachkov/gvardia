@@ -12,6 +12,8 @@ import (
 	"github.com/KirillSachkov/gvardia/internal/collect"
 	"github.com/KirillSachkov/gvardia/internal/config"
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/runners"
+	"github.com/KirillSachkov/gvardia/internal/runs"
 )
 
 // navLevel is how deep the cockpit is drilled in: projects (L0), the selected
@@ -51,13 +53,19 @@ type Model struct {
 
 	showHistory      bool                       // include ended sessions in the work pane
 	historyByProject map[string][]model.Session // lazily loaded, keyed by project path
+	runsByProject    map[string][]runs.Run      // local gvardia runs, keyed by project path
+	runList          []runs.Run                 // rows currently shown when the runs view is active
 	sessionList      []model.Session            // rows currently in the work table (cursor maps here)
 	worktreeView     bool                       // true when the right pane lists worktrees instead of agents
+	runsView         bool                       // true when the right pane prefers local runs
 	worktreeList     []model.Worktree           // rows in the worktree view (cursor maps here)
 	curated          bool                       // true when showing a curated tracked list (not a roots scan)
+	tools            []runners.Tool             // installed/missing agent tools
+	profiles         []runners.RunnerProfile    // runner profiles
 
 	confirm    *confirmPrompt  // non-nil while a y/n confirmation is pending
 	prompt     *newAgentPrompt // non-nil while the new-agent form is open
+	launch     *launchPrompt   // non-nil while the run-launch picker is open
 	pathPrompt *pathPrompt     // non-nil while the add/create-project path form is open
 }
 
@@ -87,7 +95,10 @@ func New(cfg config.Config) Model {
 		filter:           filter,
 		level:            levelProjects,
 		loading:          true,
+		runsView:         true,
 		historyByProject: make(map[string][]model.Session),
+		runsByProject:    make(map[string][]runs.Run),
+		profiles:         runners.Profiles(cfg),
 	}
 }
 
@@ -111,6 +122,9 @@ func (m *Model) selectedProject() *model.Project {
 // returns the live session running in the selected worktree (if any), so
 // attach/resume/kill act on the right agent.
 func (m *Model) selectedSession() *model.Session {
+	if m.showingRuns() {
+		return nil
+	}
 	if m.worktreeView {
 		w := m.selectedWorktree()
 		if w == nil {
@@ -134,6 +148,17 @@ func (m *Model) selectedSession() *model.Session {
 	return &m.sessionList[i]
 }
 
+func (m *Model) selectedRun() *runs.Run {
+	if !m.showingRuns() {
+		return nil
+	}
+	i := m.sessions.Cursor()
+	if i < 0 || i >= len(m.runList) {
+		return nil
+	}
+	return &m.runList[i]
+}
+
 // selectedWorktree returns the worktree under the cursor in the worktree view.
 func (m *Model) selectedWorktree() *model.Worktree {
 	i := m.sessions.Cursor()
@@ -147,6 +172,9 @@ func (m *Model) selectedWorktree() *model.Worktree {
 // and diff-target worktree for the current selection in either view. The body is
 // "" when nothing is selected.
 func (m *Model) currentDetail() (string, *model.Worktree) {
+	if r := m.selectedRun(); r != nil {
+		return runDetail(*r), m.worktreeForRun(r)
+	}
 	if m.worktreeView {
 		w := m.selectedWorktree()
 		if w == nil {
@@ -177,6 +205,26 @@ func (m *Model) worktreeFor(s *model.Session) *model.Worktree {
 		}
 	}
 	return nil
+}
+
+func (m *Model) worktreeForRun(r *runs.Run) *model.Worktree {
+	p := m.selectedProject()
+	if p == nil || r == nil {
+		return nil
+	}
+	for i := range p.Worktrees {
+		if p.Worktrees[i].Path == r.WorktreePath {
+			return &p.Worktrees[i]
+		}
+	}
+	if r.WorktreePath == "" {
+		return nil
+	}
+	base := "main"
+	if len(p.Worktrees) > 0 {
+		base = p.Worktrees[0].BaseBranch
+	}
+	return &model.Worktree{Path: r.WorktreePath, Branch: r.Branch, BaseBranch: base}
 }
 
 // setProjects stores a fresh fleet and rebuilds the projects list, preserving the
@@ -220,6 +268,8 @@ func (m *Model) applyColumns() {
 	w := m.geometry().rightInnerW
 	if m.worktreeView {
 		m.sessions.SetColumns(worktreeColumns(w))
+	} else if m.showingRuns() {
+		m.sessions.SetColumns(runColumns(w))
 	} else {
 		m.sessions.SetColumns(sessionColumns(w))
 	}
@@ -235,6 +285,7 @@ func (m *Model) rebuildSessions() {
 
 	p := m.selectedProject()
 	if p == nil {
+		m.runList = nil
 		m.sessionList = nil
 		m.worktreeList = nil
 		return
@@ -246,6 +297,13 @@ func (m *Model) rebuildSessions() {
 		rows = make([]table.Row, len(p.Worktrees))
 		for i, w := range p.Worktrees {
 			rows[i] = worktreeRow2(w)
+		}
+	} else if m.showingRuns() {
+		list := m.runsByProject[p.Path]
+		m.runList = list
+		rows = make([]table.Row, len(list))
+		for i, r := range list {
+			rows[i] = runRow(r)
 		}
 	} else {
 		list := p.WorkSessions
@@ -262,4 +320,12 @@ func (m *Model) rebuildSessions() {
 	if c := m.sessions.Cursor(); (c < 0 || c >= len(rows)) && len(rows) > 0 {
 		m.sessions.SetCursor(0)
 	}
+}
+
+func (m *Model) showingRuns() bool {
+	if !m.runsView || m.worktreeView {
+		return false
+	}
+	p := m.selectedProject()
+	return p != nil && len(m.runsByProject[p.Path]) > 0
 }

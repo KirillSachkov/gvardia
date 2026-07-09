@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/table"
 
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/runs"
 )
 
 // projectItem adapts a model.Project to the list. idx indexes back into
@@ -76,6 +77,55 @@ func sessionRow(s model.Session) table.Row {
 		delta = fmt.Sprintf("+%d/-%d", s.ChangeStat.Added, s.ChangeStat.Removed)
 	}
 	return table.Row{sessionGlyph(s), s.Harness, s.Name, task, branch, delta, relativeTime(s.LastActivity)}
+}
+
+func runColumns(width int) []table.Column {
+	const state, runner, task, tmux, last = 8, 10, 24, 18, 5
+	branch := width - (state + runner + task + tmux + last)
+	if branch < 8 {
+		branch = 8
+	}
+	return []table.Column{
+		{Title: "status", Width: state},
+		{Title: "runner", Width: runner},
+		{Title: "task", Width: task},
+		{Title: "branch", Width: branch},
+		{Title: "tmux", Width: tmux},
+		{Title: "last", Width: last},
+	}
+}
+
+func runRow(r runs.Run) table.Row {
+	task := r.TaskTitle
+	if task == "" {
+		task = "—"
+	}
+	branch := r.Branch
+	if branch == "" {
+		branch = "(none)"
+	}
+	tmux := r.TmuxTarget
+	if tmux == "" {
+		tmux = "—"
+	}
+	return table.Row{runStatusLabel(r.Status), r.Runner, task, branch, tmux, relativeTime(r.UpdatedAt)}
+}
+
+func runStatusLabel(status runs.Status) string {
+	switch status {
+	case runs.StatusRunning:
+		return "● run"
+	case runs.StatusReview:
+		return "◆ review"
+	case runs.StatusDone:
+		return "✓ done"
+	case runs.StatusFailed:
+		return "✖ fail"
+	case runs.StatusKilled:
+		return "■ killed"
+	default:
+		return "○ pending"
+	}
 }
 
 // worktreeColumns returns the worktree-pane columns sized to the given width;

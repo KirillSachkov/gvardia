@@ -9,6 +9,7 @@ import (
 
 	"github.com/KirillSachkov/gvardia/internal/adapters"
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/runs"
 )
 
 // footerHeight is the number of lines reserved below the body: a status line and
@@ -97,6 +98,8 @@ func (m Model) statusLine() string {
 	switch {
 	case m.confirm != nil:
 		return warn.Render(truncate(m.confirm.message+" (y/n)", m.width))
+	case m.launch != nil:
+		return dim.Render(truncate(m.launchStatus(), m.width))
 	case m.prompt != nil:
 		return dim.Render("new "+m.prompt.harness+" agent: ") + m.prompt.input.View()
 	case m.pathPrompt != nil:
@@ -132,10 +135,12 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · enter drill · esc back · d diff · w worktrees · t tasks · h history · a attach · r handoff · n new · A add · X untrack · C create · k kill · g gc · / filter · R · q"
+	keys := "↑↓ nav · enter drill · esc back · u runs · d diff · w worktrees · t tasks · h history · a attach · r handoff · n launch · A add · X untrack · C create · k kill · g gc · / filter · R · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
+	case m.launch != nil:
+		keys = "j/k task · tab runner · enter launch · esc cancel"
 	case m.prompt != nil:
 		keys = "tab harness · enter create · esc cancel"
 	case m.pathPrompt != nil:
@@ -146,6 +151,18 @@ func (m Model) footer() string {
 		keys = "↑↓ scroll · p project scope · / filter · esc close · R refresh"
 	}
 	return dim.Render(truncate(keys, m.width))
+}
+
+func (m Model) launchStatus() string {
+	task := "(no task)"
+	if m.launch != nil && len(m.launch.tasks) > 0 {
+		task = m.launch.tasks[m.launch.taskIdx].Title
+	}
+	runner := "(no runner)"
+	if m.launch != nil && len(m.profiles) > 0 {
+		runner = m.profiles[m.launch.profileIdx].Name
+	}
+	return fmt.Sprintf("launch run · task: %s · runner: %s", task, runner)
 }
 
 // detailHeader renders the selected session's summary and a metadata line for
@@ -205,6 +222,29 @@ func worktreeHeader(w model.Worktree) string {
 // and artifacts.
 func sessionDetail(s model.Session) string {
 	return detailHeader(s) + sessionExtra(s)
+}
+
+func runDetail(r runs.Run) string {
+	title := r.TaskTitle
+	if title == "" {
+		title = "(no task)"
+	}
+	meta := fmt.Sprintf("%s · %s/%s · %s · %s",
+		r.Status, r.Runner, r.Tool, r.Branch, relativeTime(r.UpdatedAt))
+	var b strings.Builder
+	b.WriteString(title + "\n" + dim.Render(meta))
+	if r.TmuxTarget != "" {
+		b.WriteString("\n" + dim.Render("tmux ") + r.TmuxTarget)
+	}
+	if r.WorktreePath != "" {
+		b.WriteString("\n" + dim.Render("worktree ") + r.WorktreePath)
+	}
+	if r.Report != "" {
+		b.WriteString("\n\n" + dim.Render("report") + "\n" + r.Report)
+	} else {
+		b.WriteString("\n\n" + dim.Render("report") + "\nreport.md not written yet")
+	}
+	return b.String()
 }
 
 // sessionExtra is the report + artifacts block appended below a detail header.

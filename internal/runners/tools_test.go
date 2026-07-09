@@ -138,3 +138,19 @@ func TestBuiltInToolNames(t *testing.T) {
 		t.Errorf("BuiltInToolNames = %v, want %v", got, want)
 	}
 }
+
+func TestRenderCommandReplacesKnownPlaceholders(t *testing.T) {
+	got := RenderCommand(
+		RunnerProfile{Name: "claude", Tool: "claude", CommandTemplate: "claude {{prompt_path}} --cwd {{worktree_path}} --report {{report_path}}"},
+		CommandData{
+			PromptPath:   "/tmp/prompt.md",
+			WorktreePath: "/repo/wt",
+			ReportPath:   "/repo/.gvardia/runs/run-1/report.md",
+		},
+	)
+
+	want := "claude /tmp/prompt.md --cwd /repo/wt --report /repo/.gvardia/runs/run-1/report.md"
+	if got != want {
+		t.Errorf("RenderCommand = %q, want %q", got, want)
+	}
+}

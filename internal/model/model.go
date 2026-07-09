@@ -52,6 +52,8 @@ type Task struct {
 	Status  string `json:"status"`
 	Project string `json:"project,omitempty"`
 	Path    string `json:"path"`
+	Body    string `json:"body,omitempty"`
+	Source  string `json:"source,omitempty"` // "brain" or "local"
 }
 
 // Status is an agent session's coarse state, derived conservatively per adapter.

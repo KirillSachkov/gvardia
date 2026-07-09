@@ -76,28 +76,31 @@ func TestGCConfirm(t *testing.T) {
 	}
 }
 
-func TestNewAgentPrompt(t *testing.T) {
+func TestLaunchPrompt(t *testing.T) {
 	m := ready(t)
+	m.tasks = []model.Task{
+		{ID: "a", Title: "Alpha task", Project: "alpha", Source: "local"},
+		{ID: "b", Title: "Other project", Project: "beta", Source: "local"},
+	}
 	m, _ = step(m, keyText("n"))
-	if m.prompt == nil || m.prompt.harness != "claude" {
-		t.Fatal("n should open the new-agent prompt defaulting to claude")
+	if m.launch == nil {
+		t.Fatal("n should open the launch prompt")
 	}
-	for _, r := range "foo" {
-		m, _ = step(m, keyText(string(r)))
+	if len(m.launch.tasks) != 1 || m.launch.tasks[0].Title != "Alpha task" {
+		t.Fatalf("launch tasks = %+v, want alpha-scoped task", m.launch.tasks)
 	}
-	if m.prompt.input.Value() != "foo" {
-		t.Errorf("prompt input = %q, want foo", m.prompt.input.Value())
-	}
+	firstRunner := m.profiles[m.launch.profileIdx].Name
 	m, _ = step(m, keyPress(tea.KeyTab))
-	if m.prompt.harness != "codex" {
-		t.Errorf("tab should switch harness to codex, got %q", m.prompt.harness)
+	if m.profiles[m.launch.profileIdx].Name == firstRunner {
+		t.Errorf("tab should switch runner profile from %q", firstRunner)
 	}
 	m2, cmd := step(m, keyPress(tea.KeyEnter))
-	if m2.prompt != nil || cmd == nil {
-		t.Error("enter should close the prompt and return a newAgent command")
+	if m2.launch != nil || cmd == nil {
+		t.Error("enter should close the launch prompt and return a launch command")
 	}
-	if m3, _ := step(m, keyPress(tea.KeyEscape)); m3.prompt != nil {
-		t.Error("esc should cancel the prompt")
+	m, _ = step(m, keyText("n"))
+	if m3, _ := step(m, keyPress(tea.KeyEscape)); m3.launch != nil {
+		t.Error("esc should cancel the launch prompt")
 	}
 }
 

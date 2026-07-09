@@ -26,6 +26,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.curated = msg.curated
 		m.tasks = msg.tasks
+		m.runsByProject = msg.runs
+		if msg.tools != nil {
+			m.tools = msg.tools
+		}
+		if msg.profiles != nil {
+			m.profiles = msg.profiles
+		}
 		m.banner = failureBanner(msg.failures)
 		m.setProjects(msg.projects)
 		if m.showTasks {
@@ -59,6 +66,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Returned from lazygit/git-diff/action: refresh in case things changed.
 		return m, tea.Batch(collectFleet(m.cfg), m.diffForSelection())
 
+	case runLaunchedMsg:
+		m.toast = "launched " + msg.run.ID + " in tmux"
+		m.runsView = true
+		m.worktreeView = false
+		return m, tea.Batch(collectFleet(m.cfg), m.diffForSelection())
+
 	case spawnMsg:
 		return m, spawnHarness(msg.harness, msg.dir)
 
@@ -79,6 +92,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.confirm != nil:
 		return m.handleConfirmKey(msg)
+	case m.launch != nil:
+		return m.handleLaunchKey(msg)
 	case m.prompt != nil:
 		return m.handlePromptKey(msg)
 	case m.pathPrompt != nil:
@@ -115,12 +130,24 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, enterDiff(*w, m.cfg)
 		}
 		return m, nil
+	case "u":
+		m.runsView = true
+		m.worktreeView = false
+		m.sessions.SetCursor(0)
+		m.rebuildSessions()
+		return m, m.diffForSelection()
 	case "w":
 		m.worktreeView = !m.worktreeView
+		if m.worktreeView {
+			m.runsView = false
+		}
 		m.sessions.SetCursor(0)
 		m.rebuildSessions()
 		return m, m.diffForSelection()
 	case "a":
+		if r := m.selectedRun(); r != nil {
+			return m, attachRun(*r)
+		}
 		if s := m.selectedSession(); s != nil {
 			return m, attachSession(*s)
 		}
@@ -143,7 +170,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "g":
 		return m.confirmGC()
 	case "n":
-		return m, m.openNewAgentPrompt()
+		return m, m.openLaunchPrompt()
 	case "t":
 		m.showTasks = true
 		m.rebuildTasks()
@@ -331,7 +358,7 @@ func emptyDetail(p *model.Project) string {
 	if p == nil {
 		return dim.Render("no project selected")
 	}
-	return dim.Render(fmt.Sprintf("%s — no active sessions\n\npress h for history · n for new agent", p.Name))
+	return dim.Render(fmt.Sprintf("%s — no active runs or sessions\n\npress n to launch a run · h for history", p.Name))
 }
 
 // layout sizes the panes to the current terminal dimensions, using the shared
