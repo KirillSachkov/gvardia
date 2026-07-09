@@ -129,3 +129,46 @@ func TestCreateLocalWritesReloadableTask(t *testing.T) {
 		t.Errorf("reloaded task = %+v, want written task", got[0])
 	}
 }
+
+func TestCreateAndUpdateGvardiaTask(t *testing.T) {
+	dataDir := t.TempDir()
+
+	created, err := CreateGvardia(dataDir, model.Task{
+		ID:      "ops-console",
+		Title:   "Build ops console",
+		Status:  "inbox",
+		Project: "gvardia",
+		Body:    "Make launches reliable.",
+	})
+	if err != nil {
+		t.Fatalf("CreateGvardia: %v", err)
+	}
+	if created.Source != "gvardia" || filepath.Dir(created.Path) != filepath.Join(dataDir, "tasks") {
+		t.Fatalf("created task = %+v, want gvardia task under data dir", created)
+	}
+
+	created.Status = "active"
+	created.Body = "Make launches reliable and open cmux."
+	updated, err := UpdateGvardia(dataDir, created)
+	if err != nil {
+		t.Fatalf("UpdateGvardia: %v", err)
+	}
+	if updated.Status != "active" {
+		t.Fatalf("updated status = %q, want active", updated.Status)
+	}
+
+	got := LoadGvardia(context.Background(), dataDir)
+	if len(got) != 1 {
+		t.Fatalf("LoadGvardia returned %d tasks, want 1", len(got))
+	}
+	if got[0].Source != "gvardia" || got[0].Status != "active" || got[0].Body != created.Body {
+		t.Errorf("reloaded task = %+v, want updated task", got[0])
+	}
+}
+
+func TestUpdateGvardiaRejectsMissingTask(t *testing.T) {
+	_, err := UpdateGvardia(t.TempDir(), model.Task{ID: "missing", Title: "Missing"})
+	if err == nil {
+		t.Fatal("UpdateGvardia missing task error = nil, want error")
+	}
+}

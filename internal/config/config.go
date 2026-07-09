@@ -36,11 +36,26 @@ type Config struct {
 	Tools []Tool `toml:"tools"`
 	// RunnerProfiles describe launch commands for built-in or custom tools.
 	RunnerProfiles []RunnerProfile `toml:"runner_profiles"`
+	// DataDir stores Gvardia-owned tasks and runs outside project repositories.
+	DataDir string `toml:"data_dir"`
+	// TaskSources lists enabled task stores. Supported values are gvardia and brain.
+	TaskSources []string `toml:"task_sources"`
+	// DefaultRunner is the runner profile preselected in the launch form.
+	DefaultRunner string `toml:"default_runner"`
+	// Terminal controls how run sessions are presented without replacing tmux.
+	Terminal Terminal `toml:"terminal"`
 }
 
 // Commands holds overridable paths to the external CLIs gvardia invokes.
 type Commands struct {
 	Lazygit string `toml:"lazygit"`
+}
+
+// Terminal configures the optional presentation backend used for attach.
+type Terminal struct {
+	Backend      string `toml:"backend"`
+	OpenOnLaunch bool   `toml:"open_on_launch"`
+	FocusNew     bool   `toml:"focus_new"`
 }
 
 // Tool is a custom agent CLI declaration from config.
@@ -74,6 +89,10 @@ func Default() Config {
 		Base:            map[string]string{"default": "auto"},
 		Commands:        Commands{Lazygit: "lazygit"},
 		Brain:           "~/Work/sachkov-os",
+		DataDir:         defaultDataDir(),
+		TaskSources:     []string{"gvardia"},
+		DefaultRunner:   "codex",
+		Terminal:        Terminal{Backend: "auto", OpenOnLaunch: true, FocusNew: true},
 	}
 }
 
@@ -117,7 +136,15 @@ func finalize(cfg Config) Config {
 		cfg.Roots[i] = expandHome(r)
 	}
 	cfg.Brain = expandHome(cfg.Brain)
+	cfg.DataDir = expandHome(cfg.DataDir)
 	return cfg
+}
+
+func defaultDataDir() string {
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "gvardia")
+	}
+	return expandHome(filepath.Join("~", ".local", "share", "gvardia"))
 }
 
 // expandHome replaces a leading "~" (alone or as "~/…") with the user's home

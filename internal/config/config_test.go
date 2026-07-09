@@ -9,6 +9,7 @@ import (
 )
 
 func TestDefault(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
 	got := Default()
 	if want := []string{"~/code"}; !reflect.DeepEqual(got.Roots, want) {
 		t.Errorf("Roots = %v, want %v", got.Roots, want)
@@ -24,6 +25,18 @@ func TestDefault(t *testing.T) {
 	}
 	if got.Commands.Lazygit != "lazygit" {
 		t.Errorf("Commands.Lazygit = %q, want lazygit", got.Commands.Lazygit)
+	}
+	if got.DataDir != filepath.Join(os.Getenv("XDG_DATA_HOME"), "gvardia") {
+		t.Errorf("DataDir = %q, want XDG gvardia dir", got.DataDir)
+	}
+	if want := []string{"gvardia"}; !reflect.DeepEqual(got.TaskSources, want) {
+		t.Errorf("TaskSources = %v, want %v", got.TaskSources, want)
+	}
+	if got.DefaultRunner != "codex" {
+		t.Errorf("DefaultRunner = %q, want codex", got.DefaultRunner)
+	}
+	if got.Terminal.Backend != "auto" || !got.Terminal.OpenOnLaunch || !got.Terminal.FocusNew {
+		t.Errorf("Terminal = %+v, want auto/open/focus defaults", got.Terminal)
 	}
 }
 
@@ -109,6 +122,18 @@ func TestLoadExpandsHomeInRoots(t *testing.T) {
 	want := []string{filepath.Join(home, "work"), "/abs/path", home}
 	if !reflect.DeepEqual(cfg.Roots, want) {
 		t.Errorf("Roots = %v, want %v", cfg.Roots, want)
+	}
+}
+
+func TestLoadExpandsHomeInDataDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	cfg := writeAndLoad(t, `data_dir = "~/gvardia-data"`)
+
+	if want := filepath.Join(home, "gvardia-data"); cfg.DataDir != want {
+		t.Errorf("DataDir = %q, want %q", cfg.DataDir, want)
 	}
 }
 

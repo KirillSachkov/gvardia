@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/KirillSachkov/gvardia/internal/config"
+	"github.com/KirillSachkov/gvardia/internal/model"
 	"github.com/KirillSachkov/gvardia/internal/tasks"
 )
 
-// runTasks implements `gvardia tasks`: it dumps the personal kanban (from the
-// configured brain) grouped by column.
+// runTasks implements `gvardia tasks`: it dumps configured task sources.
 func runTasks(_ []string, configPath string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -19,7 +19,16 @@ func runTasks(_ []string, configPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	for _, t := range tasks.Load(ctx, cfg.Brain) {
+	var list []model.Task
+	for _, source := range cfg.TaskSources {
+		switch source {
+		case "gvardia":
+			list = append(list, tasks.LoadGvardia(ctx, cfg.DataDir)...)
+		case "brain":
+			list = append(list, tasks.Load(ctx, cfg.Brain)...)
+		}
+	}
+	for _, t := range list {
 		proj := ""
 		if t.Project != "" {
 			proj = " [" + t.Project + "]"

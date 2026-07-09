@@ -22,11 +22,19 @@ var columns = []string{"inbox", "active", "done"}
 // Local tasks are writable and keep their Markdown body for prompt rendering.
 func LoadLocal(ctx context.Context, projectPath string) []model.Task {
 	dir := filepath.Join(projectPath, ".gvardia", "tasks")
+	return loadTaskDir(ctx, dir, filepath.Base(projectPath), "local")
+}
+
+// LoadGvardia reads Gvardia-owned tasks from <dataDir>/tasks.
+func LoadGvardia(ctx context.Context, dataDir string) []model.Task {
+	return loadTaskDir(ctx, filepath.Join(dataDir, "tasks"), "", "gvardia")
+}
+
+func loadTaskDir(ctx context.Context, dir, defaultProject, source string) []model.Task {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
-	project := filepath.Base(projectPath)
 	var out []model.Task
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
@@ -44,10 +52,10 @@ func LoadLocal(ctx context.Context, projectPath string) []model.Task {
 			ID:      firstNonEmpty(fm["id"], slug),
 			Title:   firstNonEmpty(fm["title"], slug),
 			Status:  firstNonEmpty(fm["status"], "inbox"),
-			Project: firstNonEmpty(fm["project"], project),
+			Project: firstNonEmpty(fm["project"], defaultProject),
 			Path:    path,
 			Body:    strings.TrimSpace(body),
-			Source:  "local",
+			Source:  source,
 		})
 	}
 	return out
@@ -87,6 +95,88 @@ func CreateLocal(projectPath string, task model.Task) (model.Task, error) {
 		return model.Task{}, fmt.Errorf("write task: %w", err)
 	}
 	return task, nil
+}
+
+// CreateGvardia creates a standalone task under <dataDir>/tasks.
+func CreateGvardia(dataDir string, task model.Task) (model.Task, error) {
+	if task.Title == "" {
+		return model.Task{}, fmt.Errorf("task title is required")
+	}
+	if task.ID == "" {
+		task.ID = slugify(task.Title)
+	}
+	if task.Status == "" {
+		task.Status = "inbox"
+	}
+	task.Source = "gvardia"
+	dir := filepath.Join(dataDir, "tasks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return model.Task{}, fmt.Errorf("create tasks dir: %w", err)
+	}
+	task.Path = filepath.Join(dir, slugify(task.ID)+".md")
+	content := taskMarkdown(task)
+	f, err := os.OpenFile(task.Path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return model.Task{}, fmt.Errorf("task already exists: %s", task.Path)
+		}
+		return model.Task{}, fmt.Errorf("create task: %w", err)
+	}
+	if _, err := f.Write([]byte(content)); err != nil {
+		_ = f.Close()
+		return model.Task{}, fmt.Errorf("write task: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return model.Task{}, fmt.Errorf("close task: %w", err)
+	}
+	return task, nil
+}
+
+// UpdateGvardia replaces an existing standalone task using an atomic rename.
+func UpdateGvardia(dataDir string, task model.Task) (model.Task, error) {
+	if task.ID == "" {
+		return model.Task{}, fmt.Errorf("task id is required")
+	}
+	if task.Title == "" {
+		return model.Task{}, fmt.Errorf("task title is required")
+	}
+	if task.Status == "" {
+		task.Status = "inbox"
+	}
+	task.Source = "gvardia"
+	dir := filepath.Join(dataDir, "tasks")
+	task.Path = filepath.Join(dir, slugify(task.ID)+".md")
+	if _, err := os.Stat(task.Path); err != nil {
+		if os.IsNotExist(err) {
+			return model.Task{}, fmt.Errorf("task not found: %s", task.ID)
+		}
+		return model.Task{}, fmt.Errorf("stat task: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".task-*.tmp")
+	if err != nil {
+		return model.Task{}, fmt.Errorf("create task temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write([]byte(taskMarkdown(task))); err != nil {
+		_ = tmp.Close()
+		return model.Task{}, fmt.Errorf("write task temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return model.Task{}, fmt.Errorf("close task temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		return model.Task{}, fmt.Errorf("chmod task temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, task.Path); err != nil {
+		return model.Task{}, fmt.Errorf("replace task: %w", err)
+	}
+	return task, nil
+}
+
+func taskMarkdown(task model.Task) string {
+	return fmt.Sprintf("---\nid: %q\ntitle: %q\nstatus: %q\nproject: %q\n---\n\n%s\n",
+		task.ID, task.Title, task.Status, task.Project, strings.TrimSpace(task.Body))
 }
 
 // Load walks <brainRoot>/tasks/{inbox,active,done}/*.md and returns one task per

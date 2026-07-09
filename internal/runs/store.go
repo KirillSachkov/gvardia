@@ -71,6 +71,7 @@ type CreateInput struct {
 
 // Store writes and reads runs. Optional Now/NewID seams make tests stable.
 type Store struct {
+	Root  string
 	Now   func() time.Time
 	NewID func() string
 }
@@ -79,7 +80,7 @@ type Store struct {
 func (s Store) Create(projectPath string, in CreateInput) (Run, error) {
 	now := s.now()
 	id := s.newID(now)
-	dir := runDir(projectPath, id)
+	dir := s.runDir(projectPath, id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Run{}, fmt.Errorf("create run dir: %w", err)
 	}
@@ -142,13 +143,13 @@ func (s Store) Save(run Run) error {
 		return errors.New("run project path is required")
 	}
 	if run.MetaPath == "" {
-		run.MetaPath = filepath.Join(runDir(run.ProjectPath, run.ID), "meta.json")
+		run.MetaPath = filepath.Join(s.runDir(run.ProjectPath, run.ID), "meta.json")
 	}
 	if run.PromptPath == "" {
-		run.PromptPath = filepath.Join(runDir(run.ProjectPath, run.ID), "prompt.md")
+		run.PromptPath = filepath.Join(s.runDir(run.ProjectPath, run.ID), "prompt.md")
 	}
 	if run.ReportPath == "" {
-		run.ReportPath = filepath.Join(runDir(run.ProjectPath, run.ID), "report.md")
+		run.ReportPath = filepath.Join(s.runDir(run.ProjectPath, run.ID), "report.md")
 	}
 	fillTelemetryPaths(&run)
 	run.UpdatedAt = s.now()
@@ -173,7 +174,7 @@ func (s Store) Save(run Run) error {
 
 // LoadProject reads all runs under <project>/.gvardia/runs, newest first.
 func (s Store) LoadProject(projectPath string) ([]Run, error) {
-	root := filepath.Join(projectPath, ".gvardia", "runs")
+	root := s.runsRoot(projectPath)
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -193,6 +194,9 @@ func (s Store) LoadProject(projectPath string) ([]Run, error) {
 		}
 		var run Run
 		if err := json.Unmarshal(data, &run); err != nil {
+			continue
+		}
+		if s.Root != "" && filepath.Clean(run.ProjectPath) != filepath.Clean(projectPath) {
 			continue
 		}
 		if run.ProjectPath == "" {
@@ -245,6 +249,20 @@ func (s Store) newID(now time.Time) string {
 
 func runDir(projectPath, id string) string {
 	return filepath.Join(projectPath, ".gvardia", "runs", id)
+}
+
+func (s Store) runDir(projectPath, id string) string {
+	if s.Root != "" {
+		return filepath.Join(s.Root, "runs", id)
+	}
+	return runDir(projectPath, id)
+}
+
+func (s Store) runsRoot(projectPath string) string {
+	if s.Root != "" {
+		return filepath.Join(s.Root, "runs")
+	}
+	return filepath.Join(projectPath, ".gvardia", "runs")
 }
 
 // Dir returns the run directory.

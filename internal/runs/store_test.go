@@ -3,6 +3,7 @@ package runs
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,5 +80,45 @@ func TestLoadProjectMissingStoreIsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("LoadProject missing returned %+v, want empty", got)
+	}
+}
+
+func TestStoreRootKeepsRunsOutsideProjectAndFiltersByProject(t *testing.T) {
+	root := t.TempDir()
+	projectA := filepath.Join(t.TempDir(), "alpha")
+	projectB := filepath.Join(t.TempDir(), "beta")
+	for _, project := range []string{projectA, projectB} {
+		if err := os.MkdirAll(project, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ids := []string{"run-a", "run-b"}
+	store := Store{Root: root, NewID: func() string {
+		id := ids[0]
+		ids = ids[1:]
+		return id
+	}}
+	runA, err := store.Create(projectA, CreateInput{Project: "alpha", TaskTitle: "A", Runner: "codex", Tool: "codex", Prompt: "A"})
+	if err != nil {
+		t.Fatalf("Create A: %v", err)
+	}
+	if _, err := store.Create(projectB, CreateInput{Project: "beta", TaskTitle: "B", Runner: "codex", Tool: "codex", Prompt: "B"}); err != nil {
+		t.Fatalf("Create B: %v", err)
+	}
+
+	if want := filepath.Join(root, "runs", "run-a"); runA.Dir() != want {
+		t.Fatalf("run dir = %q, want %q", runA.Dir(), want)
+	}
+	if strings.HasPrefix(runA.Dir(), projectA) {
+		t.Fatalf("run dir %q must not be inside project %q", runA.Dir(), projectA)
+	}
+
+	got, err := store.LoadProject(projectA)
+	if err != nil {
+		t.Fatalf("LoadProject A: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "run-a" {
+		t.Fatalf("LoadProject A = %+v, want only run-a", got)
 	}
 }
