@@ -92,6 +92,9 @@ func TestLaunchPrompt(t *testing.T) {
 	if got := m.profiles[m.launch.profileIdx].Name; got != "codex" {
 		t.Fatalf("default launch runner = %q, want codex", got)
 	}
+	if out := m.render(); !strings.Contains(out, "Launch run") || !strings.Contains(out, "Alpha task") || !strings.Contains(out, "codex") {
+		t.Fatalf("launch modal should be visible:\n%s", out)
+	}
 	firstRunner := m.profiles[m.launch.profileIdx].Name
 	m, _ = step(m, keyPress(tea.KeyTab))
 	if m.profiles[m.launch.profileIdx].Name == firstRunner {

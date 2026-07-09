@@ -666,15 +666,104 @@ func enterReport(path string) tea.Cmd {
 	})
 }
 
+func artifactPath(run runs.Run, artifact runs.RunArtifact) (string, error) {
+	base := run.Dir()
+	if base == "" {
+		return "", errors.New("run directory is unavailable")
+	}
+	base, err := filepath.Abs(base)
+	if err != nil {
+		return "", fmt.Errorf("resolve run directory: %w", err)
+	}
+	path := artifact.Path
+	if path == "" {
+		return "", errors.New("artifact path is empty")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(base, filepath.FromSlash(path))
+	}
+	path = filepath.Clean(path)
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact path: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("artifact path escapes the run directory")
+	}
+	return path, nil
+}
+
+func openArtifact(path string, cfg config.Config) tea.Cmd {
+	cmd, interactive, err := artifactCommand(path, cfg, exec.LookPath)
+	if err != nil {
+		return func() tea.Msg { return errMsg{err} }
+	}
+	if interactive {
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			if err != nil {
+				return errMsg{fmt.Errorf("artifact viewer: %w", err)}
+			}
+			return execDoneMsg{}
+		})
+	}
+	return func() tea.Msg {
+		if err := cmd.Run(); err != nil {
+			return errMsg{fmt.Errorf("artifact viewer: %w", err)}
+		}
+		return terminalOpenedMsg{label: filepath.Base(path)}
+	}
+}
+
+func artifactCommand(path string, cfg config.Config, lookPath func(string) (string, error)) (*exec.Cmd, bool, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".md" || ext == ".markdown" {
+		if cfg.Terminal.Backend != "copy" {
+			if _, err := lookPath("cmux"); err == nil {
+				return exec.Command("cmux", "markdown", "open", path, "--direction", "right", "--focus", "true"), false, nil
+			}
+		}
+		if _, err := lookPath("glow"); err == nil {
+			return exec.Command("glow", path), true, nil
+		}
+	}
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
+		if _, err := lookPath("open"); err == nil {
+			return exec.Command("open", path), false, nil
+		}
+	}
+	if _, err := lookPath("less"); err == nil {
+		return exec.Command("less", path), true, nil
+	}
+	if _, err := lookPath("cat"); err == nil {
+		return exec.Command("cat", path), true, nil
+	}
+	return nil, false, errors.New("no artifact viewer is available")
+}
+
 // diffCommand builds the interactive diff command: lazygit rooted at the worktree
 // (via cwd, which handles linked worktrees whose .git is a file), or a git-diff
 // fallback through delta when lazygit is absent.
 func diffCommand(wt model.Worktree, cfg config.Config) *exec.Cmd {
+	return diffCommandWithLookPath(wt, cfg, exec.LookPath)
+}
+
+func diffCommandWithLookPath(wt model.Worktree, cfg config.Config, lookPath func(string) (string, error)) *exec.Cmd {
+	if cfg.Terminal.Backend != "copy" {
+		if _, err := lookPath("cmux"); err == nil {
+			args := []string{"diff", "--branch", "--repo", wt.Path}
+			if wt.BaseBranch != "" {
+				args = append(args, "--base", wt.BaseBranch)
+			}
+			args = append(args, "--focus", "true")
+			return exec.Command("cmux", args...)
+		}
+	}
 	lazygit := cfg.Commands.Lazygit
 	if lazygit == "" {
 		lazygit = "lazygit"
 	}
-	if _, err := exec.LookPath(lazygit); err == nil {
+	if _, err := lookPath(lazygit); err == nil {
 		cmd := exec.Command(lazygit)
 		cmd.Dir = wt.Path
 		return cmd
@@ -685,7 +774,7 @@ func diffCommand(wt model.Worktree, cfg config.Config) *exec.Cmd {
 		rangeArg = wt.BaseBranch + "...HEAD"
 	}
 	args := []string{"-C", wt.Path}
-	if _, err := exec.LookPath("delta"); err == nil {
+	if _, err := lookPath("delta"); err == nil {
 		args = append(args, "-c", "core.pager=delta")
 	}
 	args = append(args, "diff", rangeArg)

@@ -49,10 +49,13 @@ func TestRunsViewShowsRunsAndReport(t *testing.T) {
 		t.Fatalf("runs table rows = %d, want 1", len(m.sessions.Rows()))
 	}
 	out := m.render()
-	for _, want := range []string{"Objective", "Evidence", "Activity", "Tests finished", "REPORT_READY", "internal/ui/view.go"} {
+	for _, want := range []string{"Objective", "Evidence", "Activity", "Tests finished", "REPORT_READY", "d open diff"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("runs view missing %q; render:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "internal/ui/view.go") {
+		t.Fatalf("changed-file list should not appear in artifacts pane:\n%s", out)
 	}
 	if !strings.Contains(out, "Build ops console") {
 		t.Errorf("runs view should show task and report; render:\n%s", out)

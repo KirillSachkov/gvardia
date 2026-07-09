@@ -10,6 +10,7 @@ import (
 
 	"github.com/KirillSachkov/gvardia/internal/model"
 	"github.com/KirillSachkov/gvardia/internal/runners"
+	"github.com/KirillSachkov/gvardia/internal/runs"
 )
 
 // confirmPrompt is a pending yes/no confirmation guarding a destructive action.
@@ -30,6 +31,12 @@ type launchPrompt struct {
 	profileIdx int
 }
 
+type artifactBrowser struct {
+	run    runs.Run
+	items  []runs.RunArtifact
+	cursor int
+}
+
 type actionKind int
 
 const (
@@ -37,6 +44,7 @@ const (
 	actionAttach
 	actionOpenDiff
 	actionOpenReport
+	actionBrowseArtifacts
 	actionLaunch
 	actionKill
 	actionGC
@@ -49,6 +57,69 @@ type actionItem struct {
 	label string
 	hint  string
 	kind  actionKind
+}
+
+func (m Model) handleArtifactKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch normalizeKey(msg.String()) {
+	case "esc", "backspace":
+		m.artifactBrowser = nil
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	case "j", "down":
+		if len(m.artifactBrowser.items) > 0 {
+			m.artifactBrowser.cursor = (m.artifactBrowser.cursor + 1) % len(m.artifactBrowser.items)
+		}
+		return m, nil
+	case "k", "up":
+		if len(m.artifactBrowser.items) > 0 {
+			m.artifactBrowser.cursor--
+			if m.artifactBrowser.cursor < 0 {
+				m.artifactBrowser.cursor = len(m.artifactBrowser.items) - 1
+			}
+		}
+		return m, nil
+	case "enter", "o":
+		browser := m.artifactBrowser
+		if len(browser.items) == 0 {
+			return m, nil
+		}
+		path, err := artifactPath(browser.run, browser.items[browser.cursor])
+		m.artifactBrowser = nil
+		if err != nil {
+			m.banner = err.Error()
+			return m, nil
+		}
+		return m, openArtifact(path, m.cfg)
+	}
+	return m, nil
+}
+
+func (m Model) openArtifactBrowser() (tea.Model, tea.Cmd) {
+	run := m.selectedRun()
+	if run == nil {
+		m.banner = "select a managed run first"
+		return m, nil
+	}
+	items := append([]runs.RunArtifact(nil), run.RunArtifacts...)
+	if run.Report != "" {
+		found := false
+		for _, artifact := range items {
+			if artifact.Path == "report.md" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			items = append(items, runs.RunArtifact{Type: "report", Title: "Final report", Path: "report.md"})
+		}
+	}
+	if len(items) == 0 {
+		m.banner = "this run has no indexed artifacts"
+		return m, nil
+	}
+	m.artifactBrowser = &artifactBrowser{run: *run, items: items}
+	return m, nil
 }
 
 type actionMenu struct {

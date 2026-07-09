@@ -76,6 +76,7 @@ func TestDiffCommandChoosesViewer(t *testing.T) {
 	// A configured lazygit that does not exist forces the git fallback.
 	cfg := config.Default()
 	cfg.Commands.Lazygit = "definitely-not-a-real-binary-xyz"
+	cfg.Terminal.Backend = "copy"
 	cmd := diffCommand(wt, cfg)
 
 	if base := filepath.Base(cmd.Args[0]); base != "git" {
@@ -89,5 +90,25 @@ func TestDiffCommandChoosesViewer(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("git fallback should target -C %s, got %v", wt.Path, cmd.Args)
+	}
+}
+
+func TestDiffCommandPrefersCmux(t *testing.T) {
+	wt := model.Worktree{Path: "/tmp/wt", BaseBranch: "main"}
+	lookup := func(name string) (string, error) {
+		if name == "cmux" {
+			return "/usr/local/bin/cmux", nil
+		}
+		return "", errors.New("missing")
+	}
+	cmd := diffCommandWithLookPath(wt, config.Default(), lookup)
+	if filepath.Base(cmd.Args[0]) != "cmux" {
+		t.Fatalf("diff command = %v, want cmux", cmd.Args)
+	}
+	joined := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"diff", "--branch", "--repo /tmp/wt", "--base main"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("cmux diff args = %v, missing %q", cmd.Args, want)
+		}
 	}
 }

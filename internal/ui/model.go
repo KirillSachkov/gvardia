@@ -83,10 +83,11 @@ type Model struct {
 	showActions       bool                       // true while contextual actions help is open
 	actionMenu        *actionMenu                // contextual actions for the selected item
 
-	confirm    *confirmPrompt  // non-nil while a y/n confirmation is pending
-	prompt     *newAgentPrompt // non-nil while the new-agent form is open
-	launch     *launchPrompt   // non-nil while the run-launch picker is open
-	pathPrompt *pathPrompt     // non-nil while the add/create-project path form is open
+	confirm         *confirmPrompt   // non-nil while a y/n confirmation is pending
+	prompt          *newAgentPrompt  // non-nil while the new-agent form is open
+	launch          *launchPrompt    // non-nil while the run-launch picker is open
+	artifactBrowser *artifactBrowser // non-nil while indexed run artifacts are selectable
+	pathPrompt      *pathPrompt      // non-nil while the add/create-project path form is open
 }
 
 // New builds the initial cockpit model. Component sizes are placeholders until

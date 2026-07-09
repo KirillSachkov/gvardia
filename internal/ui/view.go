@@ -112,7 +112,7 @@ func (m Model) render() string {
 		left := pane(m.level == levelProjects, g.leftOuterW, g.bodyH, m.projList.View())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
-	if m.showActions {
+	if m.showActions || m.launch != nil || m.artifactBrowser != nil {
 		body = m.renderModalOverlay(body, g)
 	}
 
@@ -285,10 +285,57 @@ func (m Model) renderModalOverlay(body string, g geo) string {
 		modalH = g.bodyH - 2
 	}
 	modalW, modalH = max1(modalW), max1(modalH)
-	modal := pane(true, modalW, modalH, m.actionsHelp())
+	modal := pane(true, modalW, modalH, m.modalView())
 	x := max1((m.width - modalW) / 2)
 	y := max1((g.bodyH - modalH) / 2)
 	return overlayBlock(body, modal, x, y, m.width, g.bodyH)
+}
+
+func (m Model) modalView() string {
+	if m.artifactBrowser != nil {
+		return m.artifactBrowserView()
+	}
+	if m.launch != nil {
+		return m.launchPromptView()
+	}
+	return m.actionsHelp()
+}
+
+func (m Model) launchPromptView() string {
+	var b strings.Builder
+	b.WriteString("Launch run\n\n")
+	b.WriteString("Objective\n")
+	for i, task := range m.launch.tasks {
+		cursor := "  "
+		if i == m.launch.taskIdx {
+			cursor = "› "
+		}
+		b.WriteString(cursor + valueOr(task.Title, "(untitled)") + "\n")
+	}
+	profile := runners.RunnerProfile{}
+	if len(m.profiles) > 0 && m.launch.profileIdx >= 0 && m.launch.profileIdx < len(m.profiles) {
+		profile = m.profiles[m.launch.profileIdx]
+	}
+	b.WriteString("\nRunner\n  " + valueOr(profile.Name, "(none)"))
+	b.WriteString("\n\nTerminal\n  " + valueOr(m.cfg.Terminal.Backend, "auto") + " -> new cmux workspace")
+	b.WriteString("\n\n" + dim.Render("j/k objective · tab runner · enter launch · esc cancel"))
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m Model) artifactBrowserView() string {
+	var b strings.Builder
+	b.WriteString("Run artifacts\n")
+	b.WriteString(dim.Render(valueOr(m.artifactBrowser.run.TaskTitle, m.artifactBrowser.run.ID)) + "\n\n")
+	for i, artifact := range m.artifactBrowser.items {
+		cursor := "  "
+		if i == m.artifactBrowser.cursor {
+			cursor = "› "
+		}
+		b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, valueOr(artifact.Type, "file"), valueOr(artifact.Title, artifact.Path)))
+		b.WriteString("  " + dim.Render(artifact.Path) + "\n")
+	}
+	b.WriteString("\n" + dim.Render("j/k choose · enter open · esc close"))
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func overlayBlock(base, overlay string, x, y, width, height int) string {
@@ -425,7 +472,7 @@ func (m Model) contextFooter() string {
 	case tabHistory:
 		return base + " · tab/shift+tab pane · p projects · enter actions · d diff · a attach"
 	default:
-		return base + " · tab/shift+tab pane · p projects · enter actions · s scope · a attach · d diff · o report · n launch"
+		return base + " · tab/shift+tab pane · p projects · enter actions · s scope · a attach · d diff · e artifacts · o report · n launch"
 	}
 }
 
@@ -634,11 +681,9 @@ func runReportBlock(r runs.Run) string {
 func runArtifactsPane(r runs.Run, diff string) string {
 	var sections []string
 	sections = append(sections, "Evidence\n"+runEvidenceBlock(r))
+	sections = append(sections, "Changes\n"+changesBlock(r.ChangeStat))
 	if events := runEventsBlock(r.Events); strings.TrimSpace(events) != "" {
 		sections = append(sections, "Activity\n"+events)
-	}
-	if strings.TrimSpace(diff) != "" {
-		sections = append(sections, "Diff\n"+strings.TrimSpace(diff))
 	}
 	return strings.Join(sections, "\n\n")
 }
@@ -651,17 +696,11 @@ func sessionReportBlock(s model.Session) string {
 }
 
 func sessionArtifactsPane(s model.Session, diff string) string {
-	var sections []string
-	if len(s.Artifacts) > 0 {
-		sections = append(sections, artifactsBlock(s.Artifacts))
+	stat := s.ChangeStat
+	if stat.Files == 0 && len(s.Artifacts) > 0 {
+		stat.Files = len(s.Artifacts)
 	}
-	if strings.TrimSpace(diff) != "" {
-		sections = append(sections, "Diff\n"+strings.TrimSpace(diff))
-	}
-	if len(sections) == 0 {
-		return dim.Render("No artifacts recorded yet.")
-	}
-	return strings.Join(sections, "\n\n")
+	return changesBlock(stat)
 }
 
 func worktreeArtifactsPane(w model.Worktree, diff string) string {
@@ -670,10 +709,15 @@ func worktreeArtifactsPane(w model.Worktree, diff string) string {
 	if w.ChangeStat.Files > 0 {
 		b.WriteString(fmt.Sprintf(" · +%d -%d", w.ChangeStat.Added, w.ChangeStat.Removed))
 	}
-	if strings.TrimSpace(diff) != "" {
-		b.WriteString("\n\nDiff\n" + strings.TrimSpace(diff))
-	}
+	b.WriteString("\n" + dim.Render("d open diff"))
 	return b.String()
+}
+
+func changesBlock(stat model.ChangeStat) string {
+	if stat.Files == 0 {
+		return dim.Render("No changes recorded · d open diff")
+	}
+	return fmt.Sprintf("%d files · +%d -%d\n%s", stat.Files, stat.Added, stat.Removed, dim.Render("d open diff"))
 }
 
 func taskSummary(t model.Task) string {
@@ -843,18 +887,8 @@ func runEvidenceBlock(r runs.Run) string {
 		}
 		b.WriteString(fmt.Sprintf("- %s: %s (%s)\n", valueOr(artifact.Type, "artifact"), valueOr(artifact.Title, artifact.Path), artifact.Path))
 	}
-	if len(r.Artifacts) > 0 {
-		b.WriteString(fmt.Sprintf("- diff: %d files changed", len(r.Artifacts)))
-		shown := len(r.Artifacts)
-		if shown > 5 {
-			shown = 5
-		}
-		for i := 0; i < shown; i++ {
-			b.WriteString(fmt.Sprintf("\n  %s %s", r.Artifacts[i].Status, r.Artifacts[i].Path))
-		}
-		if len(r.Artifacts) > shown {
-			b.WriteString(fmt.Sprintf("\n  ...and %d more", len(r.Artifacts)-shown))
-		}
+	if len(r.RunArtifacts) == 0 && r.Report == "" {
+		b.WriteString("- no indexed artifacts yet")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -924,20 +958,7 @@ func sessionExtra(s model.Session) string {
 // artifactsBlock renders a session's artifacts (changed files + report files),
 // capped so a large diff can't flood the detail pane.
 func artifactsBlock(arts []model.Artifact) string {
-	const cap = 20
-	var b strings.Builder
-	b.WriteString(dim.Render(fmt.Sprintf("artifacts (%d)", len(arts))))
-	shown := len(arts)
-	if shown > cap {
-		shown = cap
-	}
-	for i := 0; i < shown; i++ {
-		b.WriteString(fmt.Sprintf("\n  %-6s %s", arts[i].Status, arts[i].Path))
-	}
-	if len(arts) > cap {
-		b.WriteString(fmt.Sprintf("\n  …and %d more", len(arts)-cap))
-	}
-	return b.String()
+	return dim.Render(fmt.Sprintf("changes (%d files) · d open diff", len(arts)))
 }
 
 // failureBanner summarizes skipped adapters for the status line.

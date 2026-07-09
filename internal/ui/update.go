@@ -160,6 +160,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKey(msg)
 	case m.launch != nil:
 		return m.handleLaunchKey(msg)
+	case m.artifactBrowser != nil:
+		return m.handleArtifactKey(msg)
 	case m.prompt != nil:
 		return m.handlePromptKey(msg)
 	case m.pathPrompt != nil:
@@ -215,6 +217,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.banner = "no run report selected"
 		return m, nil
+	case "e":
+		return m.openArtifactBrowser()
 	case "u":
 		return m.switchTab(tabAgents)
 	case "w":
@@ -395,6 +399,9 @@ func (m Model) contextActions() []actionItem {
 			if r.ReportPath != "" {
 				items = append(items, actionItem{label: "Open report", hint: "Open report.md", kind: actionOpenReport})
 			}
+			if len(r.RunArtifacts) > 0 || r.Report != "" {
+				items = append(items, actionItem{label: "Browse artifacts", hint: "Select and open a run artifact", kind: actionBrowseArtifacts})
+			}
 			items = append(items, actionItem{label: "Kill", hint: "Confirm stopping this run", kind: actionKill})
 		} else if s := m.selectedSession(); s != nil {
 			items = append(items,
@@ -440,6 +447,8 @@ func (m Model) runSelectedAction() (tea.Model, tea.Cmd) {
 			return m, enterReport(r.ReportPath)
 		}
 		m.banner = "no run report selected"
+	case actionBrowseArtifacts:
+		return m.openArtifactBrowser()
 	case actionLaunch:
 		return m, m.openLaunchPrompt()
 	case actionKill:
