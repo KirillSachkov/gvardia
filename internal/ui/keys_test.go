@@ -34,9 +34,13 @@ func TestEnterDrillsAndEscClimbs(t *testing.T) {
 	if m.level != levelWork {
 		t.Fatalf("after enter, level = %d, want work", m.level)
 	}
-	m, _ = step(m, keyPress(tea.KeyEnter)) // work → detail (alpha a1 selectable)
-	if m.level != levelDetail {
-		t.Fatalf("after 2nd enter, level = %d, want detail", m.level)
+	m, _ = step(m, keyPress(tea.KeyEnter)) // work → contextual actions
+	if !m.showActions || m.actionMenu == nil {
+		t.Fatalf("after 2nd enter, actions=%v menu=%v, want contextual actions", m.showActions, m.actionMenu)
+	}
+	m, _ = step(m, keyPress(tea.KeyEnter)) // Open details
+	if m.showActions || m.level != levelDetail {
+		t.Fatalf("after action enter, actions=%v level=%d, want detail", m.showActions, m.level)
 	}
 	m, _ = step(m, keyPress(tea.KeyEscape)) // detail → work
 	if m.level != levelWork {

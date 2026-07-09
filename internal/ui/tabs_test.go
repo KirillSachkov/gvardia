@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/KirillSachkov/gvardia/internal/model"
 	"github.com/KirillSachkov/gvardia/internal/runners"
@@ -62,12 +63,12 @@ func TestEnterAndEscMoveFocusWithoutModeJumps(t *testing.T) {
 		t.Fatalf("switching tabs should keep work focus, got %v", m.level)
 	}
 	m, _ = step(m, keyPress(tea.KeyEnter))
-	if m.level != levelDetail {
-		t.Fatalf("enter from tasks tab level = %v, want detail", m.level)
+	if !m.showActions || m.actionMenu == nil {
+		t.Fatalf("enter from tasks tab should open contextual actions, showActions=%v menu=%v", m.showActions, m.actionMenu)
 	}
 	m, _ = step(m, keyPress(tea.KeyEscape))
-	if m.level != levelWork || m.activeTab != tabTasks {
-		t.Fatalf("esc should return to tasks list, got level=%v tab=%v", m.level, m.activeTab)
+	if m.showActions || m.level != levelWork || m.activeTab != tabTasks {
+		t.Fatalf("esc should return to tasks list, actions=%v level=%v tab=%v", m.showActions, m.level, m.activeTab)
 	}
 }
 
@@ -101,6 +102,22 @@ func TestProjectDrawerAndPaneNavigation(t *testing.T) {
 	}
 }
 
+func TestShiftTabMovesFocusBackward(t *testing.T) {
+	m := readyWithOpsData(t)
+	m, _ = step(m, keyPress(tea.KeyEnter)) // projects -> work, drawer hidden
+	m, _ = step(m, keyPress(tea.KeyRight)) // work -> detail
+	m, _ = step(m, tea.KeyPressMsg(tea.Key{Text: "shift+tab"}))
+	if m.level != levelWork {
+		t.Fatalf("shift+tab from detail level=%v, want work", m.level)
+	}
+	m, _ = step(m, keyText("p")) // show projects
+	m, _ = step(m, keyPress(tea.KeyRight))
+	m, _ = step(m, tea.KeyPressMsg(tea.Key{Text: "shift+tab"}))
+	if m.level != levelProjects {
+		t.Fatalf("shift+tab from work with drawer level=%v, want projects", m.level)
+	}
+}
+
 func TestAgentsTabArrowKeysMoveBetweenAgents(t *testing.T) {
 	m := readyWithOpsData(t)
 	m, _ = step(m, keyText("j"))           // beta has two live agent rows
@@ -117,7 +134,7 @@ func TestAgentsTabArrowKeysMoveBetweenAgents(t *testing.T) {
 func TestFooterIsContextualAndNotAHotkeyDump(t *testing.T) {
 	m := readyWithOpsData(t)
 	out := m.footer()
-	for _, want := range []string{"1 agents", "2 tasks", "3 worktrees", "? actions"} {
+	for _, want := range []string{"1 agents", "2 tasks", "3 worktrees", "enter actions"} {
 		if !strings.Contains(strings.ToLower(out), want) {
 			t.Fatalf("footer missing %q: %s", want, out)
 		}
@@ -132,18 +149,58 @@ func TestFooterIsContextualAndNotAHotkeyDump(t *testing.T) {
 func TestQuestionMarkShowsContextActions(t *testing.T) {
 	m := readyWithOpsData(t)
 	m, _ = step(m, keyText("?"))
-	if !m.showActions {
+	if !m.showActions || m.actionMenu == nil {
 		t.Fatal("? should open contextual actions")
 	}
-	out := m.render()
-	for _, want := range []string{"Actions", "attach", "report", "launch"} {
-		if !strings.Contains(out, want) {
+	out := strings.ToLower(m.render())
+	for _, want := range []string{"Actions", "details", "attach", "launch"} {
+		if !strings.Contains(out, strings.ToLower(want)) {
 			t.Fatalf("actions help missing %q:\n%s", want, out)
 		}
 	}
 	m, _ = step(m, keyPress(tea.KeyEscape))
 	if m.showActions {
 		t.Fatal("esc should close contextual actions")
+	}
+}
+
+func TestContextActionMenuCanOpenDetail(t *testing.T) {
+	m := readyWithOpsData(t)
+	m, _ = step(m, keyPress(tea.KeyEnter)) // project -> work
+	m, _ = step(m, keyPress(tea.KeyEnter)) // work -> actions
+	if m.actionMenu == nil || len(m.actionMenu.items) == 0 {
+		t.Fatal("enter on a selected work item should open an action menu")
+	}
+	if got := m.actionMenu.items[0].label; got != "Open details" {
+		t.Fatalf("first action = %q, want Open details", got)
+	}
+	m, _ = step(m, keyPress(tea.KeyEnter))
+	if m.showActions || m.level != levelDetail {
+		t.Fatalf("enter on Open details should close menu and focus detail, actions=%v level=%v", m.showActions, m.level)
+	}
+}
+
+func TestRenderedPanesFillTerminalWidth(t *testing.T) {
+	m := readyWithOpsData(t)
+	m.width = 120
+	m.height = 32
+	m.layout()
+
+	lines := strings.Split(m.render(), "\n")
+	bodyLines := lines[:len(lines)-footerHeight]
+	for i, line := range bodyLines {
+		if got := lipgloss.Width(line); got != m.width {
+			t.Fatalf("body line %d width = %d, want %d: %q", i, got, m.width, line)
+		}
+	}
+
+	m, _ = step(m, keyText("p"))
+	lines = strings.Split(m.render(), "\n")
+	bodyLines = lines[:len(lines)-footerHeight]
+	for i, line := range bodyLines {
+		if got := lipgloss.Width(line); got != m.width {
+			t.Fatalf("hidden drawer body line %d width = %d, want %d: %q", i, got, m.width, line)
+		}
 	}
 }
 
@@ -165,6 +222,18 @@ func TestToolsTabShowsInstallStatus(t *testing.T) {
 	out := m.render()
 	if !strings.Contains(out, "installed") || !strings.Contains(out, "missing") {
 		t.Fatalf("tools tab should show installed and missing states:\n%s", out)
+	}
+}
+
+func TestTaskAndToolDetailsDoNotShowWorktreeGoneNoise(t *testing.T) {
+	m := readyWithOpsData(t)
+	m, _ = step(m, keyText("2"))
+	if out := m.render(); strings.Contains(out, "worktree gone") {
+		t.Fatalf("task detail should not show worktree-gone noise:\n%s", out)
+	}
+	m, _ = step(m, keyText("4"))
+	if out := m.render(); strings.Contains(out, "worktree gone") {
+		t.Fatalf("tool detail should not show worktree-gone noise:\n%s", out)
 	}
 }
 

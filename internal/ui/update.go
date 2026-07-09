@@ -112,8 +112,8 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	g := m.geometry()
 	leftOuterW := g.leftOuterW
 	rightX := msg.X - leftOuterW
-	if rightX >= 0 && rightX < g.rightInnerW && msg.Y <= 2 {
-		idx := rightX * len(workTabs) / max1(g.rightInnerW)
+	if rightX >= 0 && rightX < g.rightOuterW && msg.Y <= 2 {
+		idx := rightX * len(workTabs) / max1(g.rightOuterW)
 		if idx < 0 {
 			idx = 0
 		}
@@ -126,7 +126,7 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		m.level = levelProjects
 		return m, nil
 	}
-	if msg.Y < g.sessInnerH+2 {
+	if msg.Y < g.sessOuterH {
 		m.level = levelWork
 		return m, nil
 	}
@@ -158,6 +158,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "tab":
 		return m.nextPane()
+	case "shift+tab":
+		return m.prevPane()
 	case "right":
 		return m.movePaneRight()
 	case "left":
@@ -166,8 +168,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 		return m, m.filter.Focus()
 	case "?":
-		m.showActions = true
-		return m, nil
+		return m.openActionMenu()
 	case "1":
 		return m.switchTab(tabAgents)
 	case "2":
@@ -266,11 +267,183 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleActionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch normalizeKey(msg.String()) {
-	case "?", "esc", "backspace", "enter", "q":
+	case "?", "esc", "backspace", "q":
 		m.showActions = false
+		m.actionMenu = nil
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
+	case "j", "down":
+		if m.actionMenu != nil && len(m.actionMenu.items) > 0 {
+			m.actionMenu.cursor = (m.actionMenu.cursor + 1) % len(m.actionMenu.items)
+		}
+		return m, nil
+	case "k", "up":
+		if m.actionMenu != nil && len(m.actionMenu.items) > 0 {
+			m.actionMenu.cursor--
+			if m.actionMenu.cursor < 0 {
+				m.actionMenu.cursor = len(m.actionMenu.items) - 1
+			}
+		}
+		return m, nil
+	case "enter":
+		return m.runSelectedAction()
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		if m.actionMenu == nil {
+			return m, nil
+		}
+		idx := int([]rune(normalizeKey(msg.String()))[0] - '1')
+		if idx >= 0 && idx < len(m.actionMenu.items) {
+			m.actionMenu.cursor = idx
+			return m.runSelectedAction()
+		}
+	}
+	return m, nil
+}
+
+func (m Model) openActionMenu() (tea.Model, tea.Cmd) {
+	items := m.contextActions()
+	if len(items) == 0 {
+		m.banner = "nothing actionable here"
+		return m, nil
+	}
+	m.actionMenu = &actionMenu{title: m.actionTitle(), items: items}
+	m.showActions = true
+	return m, nil
+}
+
+func (m Model) actionTitle() string {
+	switch m.activeTab {
+	case tabTasks:
+		if t := m.selectedTask(); t != nil {
+			return "Task: " + valueOr(t.Title, "(untitled)")
+		}
+		return "Tasks"
+	case tabWorktrees:
+		if w := m.selectedWorktree(); w != nil {
+			return "Worktree: " + valueOr(w.Branch, w.Path)
+		}
+		return "Worktrees"
+	case tabTools:
+		if tool := m.selectedTool(); tool != nil {
+			return "Tool: " + tool.Name
+		}
+		return "Tools"
+	case tabHistory:
+		if s := m.selectedSession(); s != nil {
+			return "History: " + valueOr(s.Name, s.Harness)
+		}
+		return "History"
+	default:
+		if r := m.selectedRun(); r != nil {
+			return "Run: " + valueOr(r.TaskTitle, r.ID)
+		}
+		if s := m.selectedSession(); s != nil {
+			return "Agent: " + valueOr(s.Name, s.Harness)
+		}
+		return "Agents"
+	}
+}
+
+func (m Model) contextActions() []actionItem {
+	items := []actionItem{{label: "Open details", hint: "Show the selected item's detail pane", kind: actionOpenDetails}}
+	if w := m.selectionWorktree(); w != nil {
+		items = append(items, actionItem{label: "Open diff", hint: "Review changes in lazygit/git diff", kind: actionOpenDiff})
+	}
+	switch m.activeTab {
+	case tabTasks:
+		items = append(items,
+			actionItem{label: "Launch run", hint: "Start selected task with a runner profile", kind: actionLaunch},
+			actionItem{label: "Toggle task scope", hint: "Switch project tasks / all tasks", kind: actionToggleTaskScope},
+		)
+	case tabWorktrees:
+		items = append(items, actionItem{label: "GC worktrees", hint: "Confirm cleanup for merged/stale worktrees", kind: actionGC})
+	case tabTools:
+		items = append(items, actionItem{label: "Refresh tools", hint: "Re-detect installed agent CLIs", kind: actionRefresh})
+	case tabHistory:
+		if m.selectedSession() != nil {
+			items = append(items, actionItem{label: "Attach", hint: "Open the terminal/session if still available", kind: actionAttach})
+		}
+	default:
+		if r := m.selectedRun(); r != nil {
+			if r.TmuxTarget != "" {
+				items = append(items, actionItem{label: "Attach", hint: "Attach to the run tmux target", kind: actionAttach})
+			}
+			if r.ReportPath != "" {
+				items = append(items, actionItem{label: "Open report", hint: "Open report.md", kind: actionOpenReport})
+			}
+			items = append(items, actionItem{label: "Kill", hint: "Confirm stopping this run", kind: actionKill})
+		} else if s := m.selectedSession(); s != nil {
+			items = append(items,
+				actionItem{label: "Attach", hint: "Attach/resume this agent", kind: actionAttach},
+				actionItem{label: "Copy resume command", hint: "Copy a shell handoff command", kind: actionCopyResume},
+				actionItem{label: "Kill", hint: "Confirm stopping the live process", kind: actionKill},
+			)
+		}
+		items = append(items, actionItem{label: "Launch run", hint: "Start a new run in this project", kind: actionLaunch})
+	}
+	return items
+}
+
+func (m Model) runSelectedAction() (tea.Model, tea.Cmd) {
+	if m.actionMenu == nil || len(m.actionMenu.items) == 0 {
+		m.showActions = false
+		m.actionMenu = nil
+		return m, nil
+	}
+	item := m.actionMenu.items[m.actionMenu.cursor]
+	m.showActions = false
+	m.actionMenu = nil
+	switch item.kind {
+	case actionOpenDetails:
+		if h, _ := m.currentDetail(); h == "" {
+			return m, nil
+		}
+		m.level = levelDetail
+		return m, m.diffForSelection()
+	case actionAttach:
+		if r := m.selectedRun(); r != nil {
+			return m, attachRun(*r)
+		}
+		if s := m.selectedSession(); s != nil {
+			return m, attachSession(*s)
+		}
+	case actionOpenDiff:
+		if w := m.selectionWorktree(); w != nil {
+			return m, enterDiff(*w, m.cfg)
+		}
+	case actionOpenReport:
+		if r := m.selectedRun(); r != nil {
+			return m, enterReport(r.ReportPath)
+		}
+		m.banner = "no run report selected"
+	case actionLaunch:
+		return m, m.openLaunchPrompt()
+	case actionKill:
+		return m.confirmKill()
+	case actionGC:
+		return m.confirmGC()
+	case actionCopyResume:
+		s := m.selectedSession()
+		if s == nil {
+			return m, nil
+		}
+		cmd := handoffCommand(*s)
+		if cmd == "" {
+			m.banner = "no resumable command for this session"
+			return m, nil
+		}
+		m.toast = "copied resume command - paste in a terminal"
+		return m, tea.SetClipboard(cmd)
+	case actionToggleTaskScope:
+		if m.activeTab == tabTasks {
+			m.taskScope = !m.taskScope
+			m.sessions.SetCursor(0)
+			m.rebuildSessions()
+			return m, m.diffForSelection()
+		}
+	case actionRefresh:
+		return m, collectFleet(m.cfg)
 	}
 	return m, nil
 }
@@ -282,6 +455,8 @@ func (m Model) toggleProjectsDrawer() (tea.Model, tea.Cmd) {
 	} else if m.level == levelProjects {
 		m.level = levelWork
 	}
+	m.showActions = false
+	m.actionMenu = nil
 	m.layout()
 	return m, m.diffForSelection()
 }
@@ -302,6 +477,26 @@ func (m Model) nextPane() (tea.Model, tea.Cmd) {
 		} else {
 			m.level = levelWork
 		}
+	}
+	return m, m.diffForSelection()
+}
+
+func (m Model) prevPane() (tea.Model, tea.Cmd) {
+	switch m.level {
+	case levelProjects:
+		if header, _ := m.currentDetail(); header != "" {
+			m.level = levelDetail
+		} else {
+			m.level = levelWork
+		}
+	case levelWork:
+		if m.showProjects {
+			m.level = levelProjects
+		} else if header, _ := m.currentDetail(); header != "" {
+			m.level = levelDetail
+		}
+	case levelDetail:
+		m.level = levelWork
 	}
 	return m, m.diffForSelection()
 }
@@ -344,8 +539,7 @@ func (m Model) drillDown() (tea.Model, tea.Cmd) {
 		if h, _ := m.currentDetail(); h == "" {
 			return m, nil
 		}
-		m.level = levelDetail
-		return m, m.diffForSelection()
+		return m.openActionMenu()
 	}
 	return m, nil
 }
@@ -438,6 +632,7 @@ func (m *Model) ensureHistory() tea.Cmd {
 func (m Model) switchTab(tab workTab) (tea.Model, tea.Cmd) {
 	m.activeTab = tab
 	m.showActions = false
+	m.actionMenu = nil
 	m.showTasks = false
 	m.worktreeView = tab == tabWorktrees
 	m.runsView = tab == tabAgents
@@ -494,7 +689,11 @@ func (m *Model) diffForSelection() tea.Cmd {
 		return nil
 	}
 	if w == nil {
-		m.diff.SetContent(header + "\n\n" + dim.Render("worktree gone — history only"))
+		content := header
+		if m.activeTab == tabAgents || m.activeTab == tabHistory {
+			content += "\n\n" + dim.Render("No worktree is attached, so diff is unavailable.")
+		}
+		m.diff.SetContent(content)
 		m.diff.GotoTop()
 		return nil
 	}

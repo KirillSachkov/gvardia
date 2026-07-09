@@ -29,6 +29,33 @@ type launchPrompt struct {
 	profileIdx int
 }
 
+type actionKind int
+
+const (
+	actionOpenDetails actionKind = iota
+	actionAttach
+	actionOpenDiff
+	actionOpenReport
+	actionLaunch
+	actionKill
+	actionGC
+	actionCopyResume
+	actionToggleTaskScope
+	actionRefresh
+)
+
+type actionItem struct {
+	label string
+	hint  string
+	kind  actionKind
+}
+
+type actionMenu struct {
+	title  string
+	items  []actionItem
+	cursor int
+}
+
 // pathMode distinguishes the two project-curation prompts.
 type pathMode int
 

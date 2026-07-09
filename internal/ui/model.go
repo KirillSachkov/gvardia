@@ -79,6 +79,7 @@ type Model struct {
 	activeTab        workTab                    // selected right-pane tab
 	showProjects     bool                       // whether the left projects drawer is visible
 	showActions      bool                       // true while contextual actions help is open
+	actionMenu       *actionMenu                // contextual actions for the selected item
 
 	confirm    *confirmPrompt  // non-nil while a y/n confirmation is pending
 	prompt     *newAgentPrompt // non-nil while the new-agent form is open

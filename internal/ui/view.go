@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/KirillSachkov/gvardia/internal/adapters"
 	"github.com/KirillSachkov/gvardia/internal/model"
@@ -43,9 +44,11 @@ var (
 
 // geo holds the derived pane geometry for the current terminal size.
 type geo struct {
+	bodyH                              int
 	leftOuterW, leftInnerW, leftInnerH int
-	rightInnerW                        int
-	sessInnerH, diffInnerH             int
+	rightOuterW, rightInnerW           int
+	sessOuterH, sessInnerH             int
+	diffOuterH, diffInnerH             int
 }
 
 // geometry derives pane sizes from the terminal dimensions. It is the single
@@ -69,9 +72,16 @@ func (m Model) geometry() geo {
 	sessH := bodyH / 2
 
 	return geo{
-		leftOuterW: leftW, leftInnerW: max1(leftW - 2), leftInnerH: max1(bodyH - 2),
+		bodyH:       bodyH,
+		leftOuterW:  leftW,
+		leftInnerW:  max1(leftW - 2),
+		leftInnerH:  max1(bodyH - 2),
+		rightOuterW: max1(rightW),
 		rightInnerW: max1(rightW - 2),
-		sessInnerH:  max1(sessH - 2), diffInnerH: max1(bodyH - sessH - 2),
+		sessOuterH:  max1(sessH),
+		sessInnerH:  max1(sessH - 2),
+		diffOuterH:  max1(bodyH - sessH),
+		diffInnerH:  max1(bodyH - sessH - 2),
 	}
 }
 
@@ -93,12 +103,13 @@ func (m Model) render() string {
 			lipgloss.Center, lipgloss.Center, "collecting fleet…")
 	}
 
-	sess := pane(m.level == levelWork, m.workPaneView())
-	diff := pane(m.level == levelDetail || m.showActions, m.detailPaneView())
+	g := m.geometry()
+	sess := pane(m.level == levelWork, g.rightOuterW, g.sessOuterH, m.workPaneView())
+	diff := pane(m.level == levelDetail || m.showActions, g.rightOuterW, g.diffOuterH, m.detailPaneView())
 	right := lipgloss.JoinVertical(lipgloss.Left, sess, diff)
 	body := right
 	if m.showProjects {
-		left := pane(m.level == levelProjects, m.projList.View())
+		left := pane(m.level == levelProjects, g.leftOuterW, g.bodyH, m.projList.View())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 
@@ -154,12 +165,32 @@ func (m Model) detailPaneView() string {
 	return m.diff.View()
 }
 
-// pane wraps content in a rounded border, brighter when focused.
-func pane(focused bool, content string) string {
+// pane wraps content in a fixed-size rounded border, brighter when focused.
+func pane(focused bool, width, height int, content string) string {
+	width = max1(width)
+	height = max1(height)
+	innerW := max1(width - 2)
+	innerH := max1(height - 2)
+	content = fitBlock(content, innerW, innerH)
+	inner := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, content)
 	if focused {
-		return borderActive.Render(content)
+		return borderActive.Render(inner)
 	}
-	return borderInactive.Render(content)
+	return borderInactive.Render(inner)
+}
+
+func fitBlock(content string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for i := range lines {
+		lines[i] = truncate(lines[i], width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // statusLine shows a modal prompt, the filter, an adapter banner, or a summary.
@@ -208,7 +239,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history · tab/←→ pane · enter open · / filter · ? actions · q"
+	keys := "1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history · tab/shift+tab pane · enter actions · / filter · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
@@ -221,7 +252,7 @@ func (m Model) footer() string {
 	case m.filtering:
 		keys = "type to filter · enter apply · esc cancel"
 	case m.showActions:
-		keys = "esc close actions · enter close · ctrl+c quit"
+		keys = "↑↓ choose · enter run · 1..9 run · esc close · ctrl+c quit"
 	default:
 		keys = m.contextFooter()
 	}
@@ -232,19 +263,22 @@ func (m Model) contextFooter() string {
 	base := "1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history"
 	switch m.activeTab {
 	case tabTasks:
-		return base + " · tab/←→ pane · p projects · s scope · n launch · / filter · ? actions"
+		return base + " · tab/shift+tab pane · p projects · enter actions · s scope · n launch · / filter"
 	case tabWorktrees:
-		return base + " · tab/←→ pane · p projects · d diff · g gc · ? actions"
+		return base + " · tab/shift+tab pane · p projects · enter actions · d diff · g gc"
 	case tabTools:
-		return base + " · tab/←→ pane · p projects · / filter · R refresh · ? actions"
+		return base + " · tab/shift+tab pane · p projects · enter actions · / filter · R refresh"
 	case tabHistory:
-		return base + " · tab/←→ pane · p projects · d diff · a attach · ? actions"
+		return base + " · tab/shift+tab pane · p projects · enter actions · d diff · a attach"
 	default:
-		return base + " · tab/←→ pane · p projects · a attach · d diff · o report · n launch · ? actions"
+		return base + " · tab/shift+tab pane · p projects · enter actions · a attach · d diff · o report · n launch"
 	}
 }
 
 func (m Model) actionsHelp() string {
+	if m.actionMenu != nil {
+		return m.actionMenuView()
+	}
 	var b strings.Builder
 	b.WriteString("Actions\n\n")
 	b.WriteString("1..5  switch tabs\n")
@@ -275,6 +309,29 @@ func (m Model) actionsHelp() string {
 	}
 	b.WriteString("\nProject curation: A add existing repo · C create repo · X untrack\n")
 	return b.String()
+}
+
+func (m Model) actionMenuView() string {
+	var b strings.Builder
+	b.WriteString("Actions")
+	if m.actionMenu.title != "" {
+		b.WriteString(" - " + m.actionMenu.title)
+	}
+	b.WriteString("\n\n")
+	for i, item := range m.actionMenu.items {
+		cursor := "  "
+		if i == m.actionMenu.cursor {
+			cursor = "› "
+		}
+		label := fmt.Sprintf("%d %s", i+1, item.label)
+		b.WriteString(cursor + label)
+		if item.hint != "" {
+			b.WriteString("\n  " + dim.Render(item.hint))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n" + dim.Render("enter run selected · ↑↓ choose · number run · esc close"))
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m Model) launchStatus() string {
@@ -374,9 +431,9 @@ func runDetail(r runs.Run) string {
 	}
 
 	if r.Report != "" {
-		b.WriteString("\n\nLatest report\n" + r.Report)
+		b.WriteString("\n\nReport summary\n" + reportSummary(r.Report))
 	} else {
-		b.WriteString("\n\nLatest report\n" + dim.Render("No final report yet. Agents should write report.md or run gvardia run report."))
+		b.WriteString("\n\nReport summary\n" + dim.Render("No final report yet. Agents should write report.md or run gvardia run report."))
 	}
 
 	b.WriteString("\n\nEvidence\n")
@@ -385,6 +442,86 @@ func runDetail(r runs.Run) string {
 	b.WriteString("\n\nActivity\n")
 	b.WriteString(runEventsBlock(r.Events))
 	return b.String()
+}
+
+func reportSummary(report string) string {
+	report = strings.TrimSpace(report)
+	if report == "" {
+		return dim.Render("No final report yet.")
+	}
+	lines := strings.Split(report, "\n")
+	if section := markdownSection(lines, "tl;dr", "summary", "резюме", "итог"); len(section) > 0 {
+		return strings.Join(limitNonEmpty(section, 5), "\n")
+	}
+	return strings.Join(limitNonEmpty(skipMarkdownTitle(lines), 6), "\n")
+}
+
+func markdownSection(lines []string, names ...string) []string {
+	for i, line := range lines {
+		title, ok := markdownHeading(line)
+		if !ok || !matchesAny(title, names...) {
+			continue
+		}
+		var out []string
+		for _, next := range lines[i+1:] {
+			if _, isHeading := markdownHeading(next); isHeading {
+				break
+			}
+			out = append(out, next)
+		}
+		return out
+	}
+	return nil
+}
+
+func markdownHeading(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "#") {
+		return "", false
+	}
+	line = strings.TrimLeft(line, "#")
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", false
+	}
+	return strings.ToLower(line), true
+}
+
+func matchesAny(value string, names ...string) bool {
+	for _, name := range names {
+		if strings.Contains(value, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func skipMarkdownTitle(lines []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	if _, ok := markdownHeading(lines[0]); ok {
+		return lines[1:]
+	}
+	return lines
+}
+
+func limitNonEmpty(lines []string, limit int) []string {
+	out := make([]string, 0, limit)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+		if len(out) >= limit {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return []string{dim.Render("Report is present but has no summary text.")}
+	}
+	return out
 }
 
 func readableRunStatus(status runs.Status) string {
@@ -551,12 +688,5 @@ func truncate(s string, width int) string {
 	if width <= 0 || lipgloss.Width(s) <= width {
 		return s
 	}
-	if width <= 1 {
-		return "…"
-	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "…"
+	return ansi.Truncate(s, width, "…")
 }

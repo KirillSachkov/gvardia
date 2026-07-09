@@ -59,6 +59,37 @@ func TestRunsViewShowsRunsAndReport(t *testing.T) {
 	}
 }
 
+func TestRunDetailSummarizesReportInsteadOfDumpingRawMarkdown(t *testing.T) {
+	detail := runDetail(runs.Run{
+		ID: "run-2", TaskTitle: "Readable report", Runner: "claude", Tool: "claude",
+		Status: runs.StatusReview,
+		Report: strings.Join([]string{
+			"# Отчёт",
+			"",
+			"## TL;DR",
+			"Short useful summary.",
+			"",
+			"## Raw transcript",
+			"line 1",
+			"line 2",
+			"line 3",
+			"line 4",
+			"line 5",
+			"line 6",
+		}, "\n"),
+	})
+
+	if !strings.Contains(detail, "Report summary") {
+		t.Fatalf("run detail should have a report summary section:\n%s", detail)
+	}
+	if !strings.Contains(detail, "Short useful summary.") {
+		t.Fatalf("run detail should include the TL;DR content:\n%s", detail)
+	}
+	if strings.Contains(detail, "Raw transcript") || strings.Contains(detail, "line 6") {
+		t.Fatalf("run detail should not dump the whole raw report:\n%s", detail)
+	}
+}
+
 func TestRunKillConfirmation(t *testing.T) {
 	m := readyWithRuns(t)
 	m, _ = step(m, keyText("k"))
