@@ -15,12 +15,12 @@ type RunnerProfile struct {
 }
 
 var builtInProfiles = []RunnerProfile{
-	{Name: "claude", Tool: "claude", CommandTemplate: "claude {{prompt_path}}", BuiltIn: true},
-	{Name: "codex", Tool: "codex", CommandTemplate: "codex {{prompt_path}}", BuiltIn: true},
-	{Name: "gemini", Tool: "gemini", CommandTemplate: "gemini {{prompt_path}}", BuiltIn: true},
-	{Name: "opencode", Tool: "opencode", CommandTemplate: "opencode {{prompt_path}}", BuiltIn: true},
-	{Name: "aider", Tool: "aider", CommandTemplate: "aider {{prompt_path}}", BuiltIn: true},
-	{Name: "goose", Tool: "goose", CommandTemplate: "goose {{prompt_path}}", BuiltIn: true},
+	{Name: "claude", Tool: "claude", CommandTemplate: "claude \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
+	{Name: "codex", Tool: "codex", CommandTemplate: "codex \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
+	{Name: "gemini", Tool: "gemini", CommandTemplate: "gemini -p \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
+	{Name: "opencode", Tool: "opencode", CommandTemplate: "opencode run \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
+	{Name: "aider", Tool: "aider", CommandTemplate: "aider --message \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
+	{Name: "goose", Tool: "goose", CommandTemplate: "goose run \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
 }
 
 // Profiles returns built-in plus configured runner profiles.
