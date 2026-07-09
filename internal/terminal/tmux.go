@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -40,6 +41,12 @@ type LaunchSpec struct {
 	WindowTitle string
 }
 
+// PaneState is the observable state of the first pane in a tmux target.
+type PaneState struct {
+	Alive    bool
+	ExitCode int
+}
+
 // Launch starts command in a detached tmux session and returns its target.
 func (s TmuxService) Launch(ctx context.Context, spec LaunchSpec) (string, error) {
 	if spec.Command == "" {
@@ -67,7 +74,35 @@ func (s TmuxService) Launch(ctx context.Context, spec LaunchSpec) (string, error
 	if err != nil {
 		return "", fmt.Errorf("tmux launch: %w", err)
 	}
+	if _, err := s.runner().Run(ctx, "", "tmux", "set-option", "-t", target, "remain-on-exit", "on"); err != nil {
+		_, _ = s.runner().Run(ctx, "", "tmux", "kill-session", "-t", target)
+		return "", fmt.Errorf("tmux keep exited pane: %w", err)
+	}
 	return target, nil
+}
+
+// Inspect reports whether the target pane is alive and its exit code when dead.
+func (s TmuxService) Inspect(ctx context.Context, target string) (PaneState, error) {
+	if target == "" {
+		return PaneState{}, errors.New("tmux target is required")
+	}
+	out, err := s.runner().Run(ctx, "", "tmux", "display-message", "-p", "-t", target, "#{pane_dead}|#{pane_dead_status}")
+	if err != nil {
+		return PaneState{}, fmt.Errorf("tmux inspect: %w", err)
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
+	if len(parts) != 2 || (parts[0] != "0" && parts[0] != "1") {
+		return PaneState{}, fmt.Errorf("tmux inspect: unexpected state %q", strings.TrimSpace(string(out)))
+	}
+	state := PaneState{Alive: parts[0] == "0"}
+	if parts[1] != "" {
+		code, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return PaneState{}, fmt.Errorf("tmux inspect: invalid exit code %q", parts[1])
+		}
+		state.ExitCode = code
+	}
+	return state, nil
 }
 
 func withShellEnv(command string, env map[string]string) string {

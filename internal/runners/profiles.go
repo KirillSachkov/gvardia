@@ -16,11 +16,25 @@ type RunnerProfile struct {
 
 var builtInProfiles = []RunnerProfile{
 	{Name: "claude", Tool: "claude", CommandTemplate: "claude \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
-	{Name: "codex", Tool: "codex", CommandTemplate: "codex \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
+	{Name: "codex", Tool: "codex", CommandTemplate: "codex -a never -s danger-full-access -C '{{worktree_path}}' \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
 	{Name: "gemini", Tool: "gemini", CommandTemplate: "gemini -p \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
 	{Name: "opencode", Tool: "opencode", CommandTemplate: "opencode run \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
 	{Name: "aider", Tool: "aider", CommandTemplate: "aider --message \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
 	{Name: "goose", Tool: "goose", CommandTemplate: "goose run \"$(cat '{{prompt_path}}')\"", BuiltIn: true},
+}
+
+// DefaultProfile returns the named profile and its index, falling back to the
+// first profile. An empty list returns the zero profile and -1.
+func DefaultProfile(profiles []RunnerProfile, name string) (RunnerProfile, int) {
+	for i, profile := range profiles {
+		if profile.Name == name {
+			return profile, i
+		}
+	}
+	if len(profiles) == 0 {
+		return RunnerProfile{}, -1
+	}
+	return profiles[0], 0
 }
 
 // Profiles returns built-in plus configured runner profiles.

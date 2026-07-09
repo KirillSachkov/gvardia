@@ -28,12 +28,16 @@ func TestTmuxLaunchBuildsDetachedSessionCommand(t *testing.T) {
 	if target != "custom-target" {
 		t.Fatalf("target = %q, want custom-target", target)
 	}
-	if len(calls) != 1 {
-		t.Fatalf("calls = %d, want 1", len(calls))
+	if len(calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(calls))
 	}
 	wantArgs := []string{"new-session", "-d", "-s", "custom-target", "-c", "/repo/gvardia-wt", "-n", "Build console", "sh", "-lc", "claude /tmp/prompt.md"}
 	if calls[0].name != "tmux" || !reflect.DeepEqual(calls[0].args, wantArgs) {
 		t.Fatalf("call = %+v, want tmux %v", calls[0], wantArgs)
+	}
+	wantRemain := []string{"set-option", "-t", "custom-target", "remain-on-exit", "on"}
+	if calls[1].name != "tmux" || !reflect.DeepEqual(calls[1].args, wantRemain) {
+		t.Fatalf("remain call = %+v, want tmux %v", calls[1], wantRemain)
 	}
 }
 
@@ -58,13 +62,37 @@ func TestTmuxLaunchExportsRunEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
-	if len(calls) != 1 {
-		t.Fatalf("calls = %d, want 1", len(calls))
+	if len(calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(calls))
 	}
 	got := calls[0].args[len(calls[0].args)-1]
 	want := "export GVARDIA_REPORT_PATH='/repo/.gvardia/runs/run-123/report.md'; export GVARDIA_RUN_DIR='/repo/.gvardia/runs/run-123'; claude /tmp/prompt.md"
 	if got != want {
 		t.Fatalf("shell command = %q, want %q", got, want)
+	}
+}
+
+func TestTmuxInspectReportsLiveAndDeadPane(t *testing.T) {
+	outputs := [][]byte{[]byte("0|\n"), []byte("1|7\n")}
+	svc := TmuxService{Runner: fakeRunner(func(context.Context, string, string, ...string) ([]byte, error) {
+		out := outputs[0]
+		outputs = outputs[1:]
+		return out, nil
+	})}
+
+	live, err := svc.Inspect(context.Background(), "live")
+	if err != nil {
+		t.Fatalf("Inspect live: %v", err)
+	}
+	if !live.Alive || live.ExitCode != 0 {
+		t.Fatalf("live state = %+v, want alive", live)
+	}
+	dead, err := svc.Inspect(context.Background(), "dead")
+	if err != nil {
+		t.Fatalf("Inspect dead: %v", err)
+	}
+	if dead.Alive || dead.ExitCode != 7 {
+		t.Fatalf("dead state = %+v, want dead exit 7", dead)
 	}
 }
 
