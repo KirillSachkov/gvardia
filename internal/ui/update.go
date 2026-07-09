@@ -35,9 +35,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.banner = failureBanner(msg.failures)
 		m.setProjects(msg.projects)
-		if m.showTasks {
-			m.rebuildTasks()
-		}
 		return m, tea.Batch(m.diffForSelection(), m.ensureHistory())
 
 	case projectsChangedMsg:
@@ -68,6 +65,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runLaunchedMsg:
 		m.toast = "launched " + msg.run.ID + " in tmux"
+		m.activeTab = tabAgents
 		m.runsView = true
 		m.worktreeView = false
 		return m, tea.Batch(collectFleet(m.cfg), m.diffForSelection())
@@ -84,16 +82,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseWheelMsg:
 		return m.handleMouseWheel(msg)
+
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(msg)
 	}
 	return m, nil
 }
 
 func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
-	if m.showTasks {
-		var cmd tea.Cmd
-		m.tasksVP, cmd = m.tasksVP.Update(msg)
-		return m, cmd
-	}
 	if m.level == levelDetail {
 		var cmd tea.Cmd
 		m.diff, cmd = m.diff.Update(msg)
@@ -106,6 +102,35 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		m.sessions, cmd = m.sessions.Update(msg)
 	}
 	return m, cmd
+}
+
+func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return m, nil
+	}
+	g := m.geometry()
+	leftOuterW := g.leftInnerW + 2
+	rightX := msg.X - leftOuterW
+	if rightX >= 0 && rightX < g.rightInnerW && msg.Y <= 2 {
+		idx := rightX * len(workTabs) / max1(g.rightInnerW)
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(workTabs) {
+			idx = len(workTabs) - 1
+		}
+		return m.switchTab(workTabs[idx].tab)
+	}
+	if msg.X < leftOuterW {
+		m.level = levelProjects
+		return m, nil
+	}
+	if msg.Y < g.sessInnerH+2 {
+		m.level = levelWork
+		return m, nil
+	}
+	m.level = levelDetail
+	return m, nil
 }
 
 // handleKey routes a key press. Modals (confirm, new-agent) take priority, then
@@ -123,8 +148,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handlePathKey(msg)
 	case m.filtering:
 		return m.handleFilterKey(msg)
-	case m.showTasks:
-		return m.handleTasksKey(msg)
+	case m.showActions:
+		return m.handleActionsKey(msg)
 	}
 
 	switch normalizeKey(msg.String()) {
@@ -140,6 +165,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.filtering = true
 		return m, m.filter.Focus()
+	case "?":
+		m.showActions = true
+		return m, nil
+	case "1":
+		return m.switchTab(tabAgents)
+	case "2":
+		return m.switchTab(tabTasks)
+	case "3":
+		return m.switchTab(tabWorktrees)
+	case "4":
+		return m.switchTab(tabTools)
+	case "5":
+		return m.switchTab(tabHistory)
 	case "R":
 		return m, collectFleet(m.cfg)
 	case "h":
@@ -160,19 +198,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.banner = "no run report selected"
 		return m, nil
 	case "u":
-		m.runsView = true
-		m.worktreeView = false
-		m.sessions.SetCursor(0)
-		m.rebuildSessions()
-		return m, m.diffForSelection()
+		return m.switchTab(tabAgents)
 	case "w":
-		m.worktreeView = !m.worktreeView
-		if m.worktreeView {
-			m.runsView = false
+		if m.activeTab == tabWorktrees {
+			return m.switchTab(tabAgents)
 		}
-		m.sessions.SetCursor(0)
-		m.rebuildSessions()
-		return m, m.diffForSelection()
+		return m.switchTab(tabWorktrees)
 	case "a":
 		if r := m.selectedRun(); r != nil {
 			return m, attachRun(*r)
@@ -200,10 +231,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.confirmGC()
 	case "n":
 		return m, m.openLaunchPrompt()
-	case "t":
-		m.showTasks = true
-		m.rebuildTasks()
+	case "p":
+		if m.activeTab == tabTasks {
+			m.taskScope = !m.taskScope
+			m.sessions.SetCursor(0)
+			m.rebuildSessions()
+			return m, m.diffForSelection()
+		}
 		return m, nil
+	case "t":
+		if m.activeTab == tabTasks {
+			return m.switchTab(tabAgents)
+		}
+		return m.switchTab(tabTasks)
 	case "A":
 		return m, m.openPathPrompt(pathAdd)
 	case "C":
@@ -220,6 +260,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	default: // levelDetail
 		return m.navigateDiff(msg)
 	}
+}
+
+func (m Model) handleActionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch normalizeKey(msg.String()) {
+	case "?", "esc", "backspace", "enter", "q":
+		m.showActions = false
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
 }
 
 // drillDown moves one navigation level deeper (projects → work → detail),
@@ -266,29 +317,18 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.filtering = false
 		m.filter.Blur()
 		m.filter.Reset()
-		if m.showTasks {
-			m.rebuildTasks()
-			return m, nil
-		}
-		m.refilter()
+		m.applyActiveFilter()
 		return m, m.diffForSelection()
 	case "enter":
 		m.filtering = false
 		m.filter.Blur()
-		if m.showTasks {
-			m.rebuildTasks()
-			return m, nil
-		}
+		m.applyActiveFilter()
 		return m, m.diffForSelection()
 	}
 
 	var cmd tea.Cmd
 	m.filter, cmd = m.filter.Update(msg)
-	if m.showTasks {
-		m.rebuildTasks()
-		return m, cmd
-	}
-	m.refilter()
+	m.applyActiveFilter()
 	return m, tea.Batch(cmd, m.diffForSelection())
 }
 
@@ -309,16 +349,17 @@ func (m Model) navigateProjects(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // toggleHistory flips the history flag, lazily loading it for the selected
 // project the first time it is shown.
 func (m Model) toggleHistory() (tea.Model, tea.Cmd) {
-	m.showHistory = !m.showHistory
-	cmd := m.ensureHistory()
-	m.rebuildSessions()
-	return m, cmd
+	if m.activeTab == tabHistory {
+		m.showHistory = false
+		return m.switchTab(tabAgents)
+	}
+	return m.switchTab(tabHistory)
 }
 
 // ensureHistory returns a command to load history for the selected project when
 // history is shown and not yet cached; nil otherwise.
 func (m *Model) ensureHistory() tea.Cmd {
-	if !m.showHistory {
+	if m.activeTab != tabHistory && !m.showHistory {
 		return nil
 	}
 	p := m.selectedProject()
@@ -329,6 +370,21 @@ func (m *Model) ensureHistory() tea.Cmd {
 		return nil
 	}
 	return loadHistory(p.Path)
+}
+
+func (m Model) switchTab(tab workTab) (tea.Model, tea.Cmd) {
+	m.activeTab = tab
+	m.showActions = false
+	m.showTasks = false
+	m.worktreeView = tab == tabWorktrees
+	m.runsView = tab == tabAgents
+	m.showHistory = tab == tabHistory
+	if m.level == levelProjects || m.level == levelDetail {
+		m.level = levelWork
+	}
+	m.sessions.SetCursor(0)
+	m.rebuildSessions()
+	return m, tea.Batch(m.ensureHistory(), m.diffForSelection())
 }
 
 // navigateSessions forwards a key to the sessions table and refreshes the diff if
@@ -351,6 +407,15 @@ func (m *Model) refilter() {
 	}
 	m.applyFilter(items)
 	m.rebuildSessions()
+}
+
+func (m *Model) applyActiveFilter() {
+	if m.activeTab == tabTasks || m.activeTab == tabTools {
+		m.sessions.SetCursor(0)
+		m.rebuildSessions()
+		return
+	}
+	m.refilter()
 }
 
 // diffForSelection shows the current selection's detail header immediately and
@@ -387,7 +452,7 @@ func emptyDetail(p *model.Project) string {
 	if p == nil {
 		return dim.Render("no project selected")
 	}
-	return dim.Render(fmt.Sprintf("%s — no active runs or sessions\n\npress n to launch a run · h for history", p.Name))
+	return dim.Render(fmt.Sprintf("%s — nothing selected in this tab\n\npress 2 for tasks · n to launch a run · ? for actions", p.Name))
 }
 
 // layout sizes the panes to the current terminal dimensions, using the shared
@@ -400,7 +465,7 @@ func (m *Model) layout() {
 	m.projList.SetSize(g.leftInnerW, g.leftInnerH)
 	m.applyColumns()
 	m.sessions.SetWidth(g.rightInnerW)
-	m.sessions.SetHeight(max1(g.sessInnerH - 1))
+	m.sessions.SetHeight(max1(g.sessInnerH - workPaneHeaderLines))
 	m.diff.SetWidth(g.rightInnerW)
 	m.diff.SetHeight(g.diffInnerH)
 

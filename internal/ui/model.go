@@ -4,6 +4,8 @@
 package ui
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
@@ -28,6 +30,16 @@ const (
 	levelDetail
 )
 
+type workTab int
+
+const (
+	tabAgents workTab = iota
+	tabTasks
+	tabWorktrees
+	tabTools
+	tabHistory
+)
+
 // Model holds the cockpit state. It stores data and selection only; everything
 // visual is derived in View.
 type Model struct {
@@ -40,10 +52,10 @@ type Model struct {
 	diff     viewport.Model
 	filter   textinput.Model
 
-	tasks     []model.Task   // kanban snapshot from the brain
-	showTasks bool           // true while the full-screen tasks browser is open
-	taskScope bool           // in the tasks browser, limit to the selected project
-	tasksVP   viewport.Model // scrollable tasks browser content
+	tasks     []model.Task   // task snapshot from local files and configured sources
+	showTasks bool           // legacy compatibility flag; tasks now live in tabTasks
+	taskScope bool           // in the tasks tab, limit to the selected project
+	tasksVP   viewport.Model // legacy full-screen task viewport
 
 	level     navLevel
 	filtering bool   // true while the filter textinput is capturing input
@@ -56,12 +68,16 @@ type Model struct {
 	runsByProject    map[string][]runs.Run      // local gvardia runs, keyed by project path
 	runList          []runs.Run                 // rows currently shown when the runs view is active
 	sessionList      []model.Session            // rows currently in the work table (cursor maps here)
-	worktreeView     bool                       // true when the right pane lists worktrees instead of agents
-	runsView         bool                       // true when the right pane prefers local runs
+	worktreeView     bool                       // legacy compatibility flag for tabWorktrees
+	runsView         bool                       // legacy compatibility flag for tabAgents
 	worktreeList     []model.Worktree           // rows in the worktree view (cursor maps here)
+	taskList         []model.Task               // rows in the tasks tab (cursor maps here)
+	toolList         []runners.Tool             // rows in the tools tab (cursor maps here)
 	curated          bool                       // true when showing a curated tracked list (not a roots scan)
 	tools            []runners.Tool             // installed/missing agent tools
 	profiles         []runners.RunnerProfile    // runner profiles
+	activeTab        workTab                    // selected right-pane tab
+	showActions      bool                       // true while contextual actions help is open
 
 	confirm    *confirmPrompt  // non-nil while a y/n confirmation is pending
 	prompt     *newAgentPrompt // non-nil while the new-agent form is open
@@ -96,6 +112,7 @@ func New(cfg config.Config) Model {
 		level:            levelProjects,
 		loading:          true,
 		runsView:         true,
+		activeTab:        tabAgents,
 		historyByProject: make(map[string][]model.Session),
 		runsByProject:    make(map[string][]runs.Run),
 		profiles:         runners.Profiles(cfg),
@@ -122,10 +139,10 @@ func (m *Model) selectedProject() *model.Project {
 // returns the live session running in the selected worktree (if any), so
 // attach/resume/kill act on the right agent.
 func (m *Model) selectedSession() *model.Session {
-	if m.showingRuns() {
+	if m.showingRuns() || m.activeTab == tabTasks || m.activeTab == tabTools {
 		return nil
 	}
-	if m.worktreeView {
+	if m.activeTab == tabWorktrees {
 		w := m.selectedWorktree()
 		if w == nil {
 			return nil
@@ -161,6 +178,9 @@ func (m *Model) selectedRun() *runs.Run {
 
 // selectedWorktree returns the worktree under the cursor in the worktree view.
 func (m *Model) selectedWorktree() *model.Worktree {
+	if m.activeTab != tabWorktrees {
+		return nil
+	}
 	i := m.sessions.Cursor()
 	if i < 0 || i >= len(m.worktreeList) {
 		return nil
@@ -168,14 +188,42 @@ func (m *Model) selectedWorktree() *model.Worktree {
 	return &m.worktreeList[i]
 }
 
+func (m *Model) selectedTask() *model.Task {
+	if m.activeTab != tabTasks {
+		return nil
+	}
+	i := m.sessions.Cursor()
+	if i < 0 || i >= len(m.taskList) {
+		return nil
+	}
+	return &m.taskList[i]
+}
+
+func (m *Model) selectedTool() *runners.Tool {
+	if m.activeTab != tabTools {
+		return nil
+	}
+	i := m.sessions.Cursor()
+	if i < 0 || i >= len(m.toolList) {
+		return nil
+	}
+	return &m.toolList[i]
+}
+
 // currentDetail returns the detail body (summary · task · report · artifacts)
 // and diff-target worktree for the current selection in either view. The body is
 // "" when nothing is selected.
 func (m *Model) currentDetail() (string, *model.Worktree) {
+	if t := m.selectedTask(); t != nil {
+		return taskDetail(*t), nil
+	}
+	if tool := m.selectedTool(); tool != nil {
+		return toolDetail(*tool), nil
+	}
 	if r := m.selectedRun(); r != nil {
 		return runDetail(*r), m.worktreeForRun(r)
 	}
-	if m.worktreeView {
+	if m.activeTab == tabWorktrees {
 		w := m.selectedWorktree()
 		if w == nil {
 			return "", nil
@@ -266,12 +314,21 @@ func (m *Model) applyFilter(items []list.Item) {
 // SetColumns re-renders the current rows.
 func (m *Model) applyColumns() {
 	w := m.geometry().rightInnerW
-	if m.worktreeView {
+	switch m.activeTab {
+	case tabTasks:
+		m.sessions.SetColumns(taskColumns(w))
+	case tabWorktrees:
 		m.sessions.SetColumns(worktreeColumns(w))
-	} else if m.showingRuns() {
-		m.sessions.SetColumns(runColumns(w))
-	} else {
+	case tabTools:
+		m.sessions.SetColumns(toolColumns(w))
+	case tabHistory:
 		m.sessions.SetColumns(sessionColumns(w))
+	default:
+		if m.showingRuns() {
+			m.sessions.SetColumns(runColumns(w))
+		} else {
+			m.sessions.SetColumns(sessionColumns(w))
+		}
 	}
 }
 
@@ -282,38 +339,62 @@ func (m *Model) applyColumns() {
 func (m *Model) rebuildSessions() {
 	m.sessions.SetRows(nil)
 	m.applyColumns()
+	m.runList = nil
+	m.sessionList = nil
+	m.worktreeList = nil
+	m.taskList = nil
+	m.toolList = nil
 
 	p := m.selectedProject()
-	if p == nil {
-		m.runList = nil
-		m.sessionList = nil
-		m.worktreeList = nil
+	if p == nil && m.activeTab != tabTools {
 		return
 	}
 
 	var rows []table.Row
-	if m.worktreeView {
+	switch m.activeTab {
+	case tabTasks:
+		list := m.filteredTasks()
+		m.taskList = list
+		rows = make([]table.Row, len(list))
+		for i, t := range list {
+			rows[i] = taskRow(t)
+		}
+	case tabWorktrees:
 		m.worktreeList = p.Worktrees
 		rows = make([]table.Row, len(p.Worktrees))
 		for i, w := range p.Worktrees {
 			rows[i] = worktreeRow2(w)
 		}
-	} else if m.showingRuns() {
+	case tabTools:
+		list := m.filteredTools()
+		m.toolList = list
+		rows = make([]table.Row, len(list))
+		for i, tool := range list {
+			rows[i] = toolRow(tool)
+		}
+	case tabHistory:
+		m.showHistory = true
+		list := collect.MergeHistory(p.WorkSessions, m.historyByProject[p.Path])
+		m.sessionList = list
+		rows = make([]table.Row, len(list))
+		for i, s := range list {
+			rows[i] = sessionRow(s)
+		}
+	default:
+		if !m.showingRuns() {
+			list := p.WorkSessions
+			m.sessionList = list
+			rows = make([]table.Row, len(list))
+			for i, s := range list {
+				rows[i] = sessionRow(s)
+			}
+			break
+		}
 		list := m.runsByProject[p.Path]
 		m.runList = list
 		rows = make([]table.Row, len(list))
 		for i, r := range list {
 			rows[i] = runRow(r)
-		}
-	} else {
-		list := p.WorkSessions
-		if m.showHistory {
-			list = collect.MergeHistory(p.WorkSessions, m.historyByProject[p.Path])
-		}
-		m.sessionList = list
-		rows = make([]table.Row, len(list))
-		for i, s := range list {
-			rows[i] = sessionRow(s)
 		}
 	}
 	m.sessions.SetRows(rows)
@@ -323,9 +404,42 @@ func (m *Model) rebuildSessions() {
 }
 
 func (m *Model) showingRuns() bool {
-	if !m.runsView || m.worktreeView {
+	if m.activeTab != tabAgents || !m.runsView {
 		return false
 	}
 	p := m.selectedProject()
 	return p != nil && len(m.runsByProject[p.Path]) > 0
+}
+
+func (m *Model) filteredTasks() []model.Task {
+	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	scope := ""
+	if m.taskScope {
+		if p := m.selectedProject(); p != nil {
+			scope = p.Name
+		}
+	}
+	out := make([]model.Task, 0, len(m.tasks))
+	for _, t := range m.tasks {
+		if scope != "" && !projectMatches(t.Project, scope) {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(t.Title+" "+t.Project+" "+t.ID+" "+t.Status), q) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func (m *Model) filteredTools() []runners.Tool {
+	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	out := make([]runners.Tool, 0, len(m.tools))
+	for _, tool := range m.tools {
+		haystack := strings.ToLower(tool.Name + " " + tool.Command + " " + tool.Path)
+		if q == "" || strings.Contains(haystack, q) {
+			out = append(out, tool)
+		}
+	}
+	return out
 }

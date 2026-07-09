@@ -27,25 +27,25 @@ func readyWithTasks(t *testing.T) Model {
 
 func TestTasksViewToggles(t *testing.T) {
 	m := readyWithTasks(t)
-	if m.showTasks {
-		t.Fatal("tasks view should start closed")
+	if m.activeTab != tabAgents {
+		t.Fatal("tasks tab should not be active initially")
 	}
 	m, _ = step(m, keyText("t"))
-	if !m.showTasks {
-		t.Fatal("t should open the tasks view")
+	if m.activeTab != tabTasks {
+		t.Fatal("t should switch to the tasks tab")
 	}
 	if out := m.render(); !strings.Contains(out, "Fix payment bug") {
-		t.Errorf("tasks view should list tasks; render:\n%s", out)
+		t.Errorf("tasks tab should list tasks; render:\n%s", out)
 	}
 	m, _ = step(m, keyPress(tea.KeyEscape))
-	if m.showTasks {
-		t.Error("esc should close the tasks view")
+	if m.level != levelProjects {
+		t.Error("esc should return focus toward projects")
 	}
 }
 
 func TestTasksViewProjectScope(t *testing.T) {
 	m := readyWithTasks(t)
-	m, _ = step(m, keyText("t")) // open (alpha selected)
+	m, _ = step(m, keyText("t")) // tasks tab (alpha selected)
 	// scope on → only alpha's task remains visible
 	m, _ = step(m, keyText("p"))
 	if !m.taskScope {

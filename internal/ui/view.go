@@ -9,18 +9,36 @@ import (
 
 	"github.com/KirillSachkov/gvardia/internal/adapters"
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/runners"
 	"github.com/KirillSachkov/gvardia/internal/runs"
 )
 
 // footerHeight is the number of lines reserved below the body: a status line and
 // the keybind footer.
 const footerHeight = 2
+const workPaneHeaderLines = 2
+
+type workTabSpec struct {
+	tab   workTab
+	key   string
+	label string
+}
+
+var workTabs = []workTabSpec{
+	{tab: tabAgents, key: "1", label: "agents"},
+	{tab: tabTasks, key: "2", label: "tasks"},
+	{tab: tabWorktrees, key: "3", label: "worktrees"},
+	{tab: tabTools, key: "4", label: "tools"},
+	{tab: tabHistory, key: "5", label: "history"},
+}
 
 var (
 	borderActive   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("62"))
 	borderInactive = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
 	dim            = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	warn           = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	tabActive      = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("62"))
+	tabInactive    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 )
 
 // geo holds the derived pane geometry for the current terminal size.
@@ -72,14 +90,9 @@ func (m Model) render() string {
 			lipgloss.Center, lipgloss.Center, "collecting fleet…")
 	}
 
-	if m.showTasks {
-		return lipgloss.JoinVertical(lipgloss.Left,
-			pane(true, m.tasksVP.View()), m.statusLine(), m.footer())
-	}
-
 	left := pane(m.level == levelProjects, m.projList.View())
 	sess := pane(m.level == levelWork, m.workPaneView())
-	diff := pane(m.level == levelDetail, m.diff.View())
+	diff := pane(m.level == levelDetail || m.showActions, m.detailPaneView())
 	right := lipgloss.JoinVertical(lipgloss.Left, sess, diff)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
@@ -87,7 +100,7 @@ func (m Model) render() string {
 }
 
 func (m Model) workPaneView() string {
-	return m.workPaneTitle() + "\n" + m.sessions.View()
+	return m.tabsLine() + "\n" + m.workPaneTitle() + "\n" + m.sessions.View()
 }
 
 func (m Model) workPaneTitle() string {
@@ -101,14 +114,38 @@ func (m Model) workPaneTitle() string {
 			}
 		}
 	}
-	active := "runs"
-	if m.worktreeView {
-		active = "worktrees"
-	} else if !m.showingRuns() {
-		active = "sessions"
-	}
+	active := m.activeTabLabel()
 	return dim.Render(fmt.Sprintf(" %s · runs %d (%d review) · sessions %d · worktrees %d ",
 		strings.ToUpper(active), runsCount, reviewCount, len(m.sessionList), len(m.worktreeList)))
+}
+
+func (m Model) tabsLine() string {
+	parts := make([]string, 0, len(workTabs))
+	for _, spec := range workTabs {
+		label := fmt.Sprintf(" %s %s ", spec.key, spec.label)
+		if spec.tab == m.activeTab {
+			parts = append(parts, tabActive.Render(label))
+			continue
+		}
+		parts = append(parts, tabInactive.Render(label))
+	}
+	return strings.Join(parts, dim.Render(" | "))
+}
+
+func (m Model) activeTabLabel() string {
+	for _, spec := range workTabs {
+		if spec.tab == m.activeTab {
+			return spec.label
+		}
+	}
+	return "agents"
+}
+
+func (m Model) detailPaneView() string {
+	if m.showActions {
+		return m.actionsHelp()
+	}
+	return m.diff.View()
 }
 
 // pane wraps content in a rounded border, brighter when focused.
@@ -140,12 +177,6 @@ func (m Model) statusLine() string {
 		return dim.Render(truncate("✓ "+m.toast, m.width))
 	case m.banner != "":
 		return warn.Render(truncate("⚠ "+m.banner, m.width))
-	case m.showTasks:
-		scope := "all projects"
-		if m.taskScope {
-			scope = "selected project"
-		}
-		return dim.Render(truncate(fmt.Sprintf("kanban · %s · p to toggle scope", scope), m.width))
 	default:
 		agents := 0
 		activeRuns := 0
@@ -171,7 +202,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · enter drill · esc back · u runs · d diff · o report · w worktrees · t tasks · h history · a attach · r handoff · n launch · A add · X untrack · C create · k kill · g gc · / filter · R · q"
+	keys := "1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history · enter open · / filter · ? actions · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
@@ -183,10 +214,58 @@ func (m Model) footer() string {
 		keys = "enter confirm · esc cancel"
 	case m.filtering:
 		keys = "type to filter · enter apply · esc cancel"
-	case m.showTasks:
-		keys = "↑↓ scroll · p project scope · / filter · esc close · R refresh"
+	case m.showActions:
+		keys = "esc close actions · enter close · ctrl+c quit"
+	default:
+		keys = m.contextFooter()
 	}
 	return dim.Render(truncate(keys, m.width))
+}
+
+func (m Model) contextFooter() string {
+	base := "1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history"
+	switch m.activeTab {
+	case tabTasks:
+		return base + " · enter detail · n launch · p scope · / filter · ? actions"
+	case tabWorktrees:
+		return base + " · enter detail · d diff · g gc · ? actions"
+	case tabTools:
+		return base + " · enter detail · / filter · R refresh · ? actions"
+	case tabHistory:
+		return base + " · enter detail · d diff · a attach · ? actions"
+	default:
+		return base + " · enter detail · a attach · d diff · o report · n launch · ? actions"
+	}
+}
+
+func (m Model) actionsHelp() string {
+	var b strings.Builder
+	b.WriteString("Actions\n\n")
+	b.WriteString("1..5  switch tabs\n")
+	b.WriteString("enter drill into selected item, esc goes back\n")
+	b.WriteString("/      filter current context\n")
+	b.WriteString("R      refresh\n")
+	b.WriteString("n      launch selected project task with a runner profile\n")
+	switch m.activeTab {
+	case tabTasks:
+		b.WriteString("p      toggle all tasks / selected project scope\n")
+		b.WriteString("n      launch a run from this project\n")
+	case tabWorktrees:
+		b.WriteString("d      open lazygit/git diff for selected worktree\n")
+		b.WriteString("g      confirm worktree cleanup\n")
+	case tabTools:
+		b.WriteString("R      re-detect installed agent tools\n")
+	case tabHistory:
+		b.WriteString("a      attach when the selected historical row still has a target\n")
+		b.WriteString("d      open diff for the selected session worktree\n")
+	default:
+		b.WriteString("a      attach selected run/session\n")
+		b.WriteString("o      open report.md for selected run\n")
+		b.WriteString("k      confirm kill selected run/session\n")
+		b.WriteString("r      copy resume command for selected live session\n")
+	}
+	b.WriteString("\nProject curation: A add existing repo · C create repo · X untrack\n")
+	return b.String()
 }
 
 func (m Model) launchStatus() string {
@@ -284,6 +363,56 @@ func runDetail(r runs.Run) string {
 		b.WriteString("\n\n" + artifactsBlock(r.Artifacts))
 	}
 	return b.String()
+}
+
+func taskDetail(t model.Task) string {
+	title := t.Title
+	if title == "" {
+		title = "(untitled task)"
+	}
+	meta := fmt.Sprintf("%s · %s · %s", valueOr(t.Status, "inbox"), valueOr(t.Project, "no project"), valueOr(t.ID, "no id"))
+	var b strings.Builder
+	b.WriteString(title + "\n" + dim.Render(meta))
+	if t.Source != "" {
+		b.WriteString("\n" + dim.Render("source ") + t.Source)
+	}
+	if t.Path != "" {
+		b.WriteString("\n" + dim.Render("path ") + t.Path)
+	}
+	if t.Body != "" {
+		b.WriteString("\n\n" + t.Body)
+	}
+	return b.String()
+}
+
+func toolDetail(tool runners.Tool) string {
+	state := "missing"
+	if tool.Installed {
+		state = "installed"
+	}
+	kind := "custom"
+	if tool.BuiltIn {
+		kind = "built-in"
+	}
+	var b strings.Builder
+	b.WriteString(tool.Name + "\n" + dim.Render(fmt.Sprintf("%s · %s · command %s", state, kind, valueOr(tool.Command, tool.Name))))
+	if tool.Path != "" {
+		b.WriteString("\n" + dim.Render("path ") + tool.Path)
+	}
+	b.WriteString("\n\n")
+	if tool.Installed {
+		b.WriteString("Ready for runner profiles that use this tool.")
+	} else {
+		b.WriteString("Install this CLI or override it with a custom tool in config.")
+	}
+	return b.String()
+}
+
+func valueOr(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
 }
 
 // sessionExtra is the report + artifacts block appended below a detail header.

@@ -86,7 +86,7 @@ func TestEmptyDetailNotBlank(t *testing.T) {
 	projs := []model.Project{{Name: "empty", Path: "/r/empty",
 		Worktrees: []model.Worktree{{Path: "/r/empty", Branch: "main", IsPrimary: true}}}}
 	m, _ = step(m, fleetMsg{projects: projs})
-	if out := m.render(); !strings.Contains(out, "no active runs or sessions") {
-		t.Errorf("empty project detail should hint 'no active runs or sessions'; render:\n%s", out)
+	if out := m.render(); !strings.Contains(out, "nothing selected in this tab") {
+		t.Errorf("empty project detail should hint about the current tab; render:\n%s", out)
 	}
 }

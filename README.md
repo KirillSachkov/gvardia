@@ -18,28 +18,29 @@ viewing, or agent management. It aggregates state and shells out to proven tools
 ## What it looks like
 
 ```
-┌ PROJECTS (live first) ─┬ WORK · education-platform ───────────────────────────┐
-│▸education-platform 3●  │  st   harness agent          task   branch        Δ  last│
-│  se-tutorial      2●   │  ● busy  claude edu-85        #675  feat/675-s3 +90/-12 2m│
-│  senior-ticker    1○   │  ● busy  claude edu-18        #712  epic/pr-dial +412/-8 5m│
-│  OpenTicker       0    │  ○ idle  claude edu-da         —    dev                 1h│
-│  … (0 live)            │  ✓ ended codex  ab12ef90      #649  fix/quiz     +30/-4  3h│
+┌ PROJECTS ──────────────┬ 1 agents | 2 tasks | 3 worktrees | 4 tools | 5 history ┐
+│▸education-platform 3●  │ AGENTS · runs 2 (1 review) · sessions 3 · worktrees 4 │
+│  se-tutorial      2●   │ status   runner  task              branch        Δ last│
+│  senior-ticker    1○   │ ◆ review claude  Auth cleanup      gvardia/run-1 +90 2m│
+│  OpenTicker       0    │ ● run    codex   Payment bug       gvardia/run-2 +12 7m│
+│  …                      │ ○ idle   claude  edu-da            dev              1h│
 ├────────────────────────┴──────────────────────────────────────────────────────┤
-│ DETAIL · edu-85                                                                 │
-│ Finish OpenIddict snake_case + review fixes for s3                             │
-│ busy claude · #675 · feat/675-s3 · 14 files +90 -12 · 2m                        │
-│ report  Done: switched the token claims to snake_case and green-lit the tests.  │
-│ artifacts (3)  M src/Auth.cs · A tests/AuthTests.cs · report .gvardia/reports/… │
+│ Auth cleanup                                                                   │
+│ review · claude/claude · gvardia/run-1 · 2m                                    │
+│ report                                                                         │
+│ Done: switched the token claims to snake_case and green-lit the tests.         │
+│ artifacts (3)  M src/Auth.cs · A tests/AuthTests.cs · report.md               │
 ├────────────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ nav · enter drill · esc back · d diff · w worktrees · t tasks · h history …  │
+│ 1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history · enter detail · ? actions│
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The main work pane now prefers local gvardia runs when they exist. A run has a
-task, runner profile, worktree, tmux target, diff stat, report, and artifacts.
-Existing live sessions and history are still available. Press `u` for runs, `w`
-for worktrees, `h` for ended sessions, `t` for tasks, and `d` for `lazygit`.
-Keybinds work under a Russian (ЙЦУКЕН) layout too.
+The right side is a lazygit-style tabbed work area. Press `1` through `5` for
+Agents, Tasks, Worktrees, Tools, and History. `enter` drills into the selected
+pane, `esc` backs out, and `?` shows actions for the current tab. The detail pane
+changes with the selected row: runs show reports/artifacts, tasks show task body,
+worktrees show git state, and tools show installed/missing status. Keybinds work
+under a Russian (ЙЦУКЕН) layout too.
 
 ## Install
 
@@ -76,15 +77,19 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 | Key        | Action                                                         |
 |------------|----------------------------------------------------------------|
 | `↑↓` `j k` | navigate the focused level (arrows work on any keyboard layout)|
-| `enter`    | drill down a level (projects → sessions → detail)              |
+| `1`        | agents tab: local runs first, live sessions when no runs exist |
+| `2`        | tasks tab: local + brain tasks, optional project scope         |
+| `3`        | worktrees tab: every worktree and the agent running there      |
+| `4`        | tools tab: installed/missing agent CLIs                        |
+| `5`        | history tab: live + recent ended sessions                      |
+| `enter`    | drill down a level (projects → active tab → detail)            |
 | `esc` `⌫`  | climb back up a level                                          |
-| `tab`      | jump between the projects and sessions levels                  |
-| `u`        | show local gvardia runs for the selected project                |
+| `tab`      | jump between the projects and active-tab levels                |
+| `?`        | show contextual actions for the current tab                    |
 | `d`        | open the selection's worktree in `lazygit` (fallback: `git diff`) |
 | `o`        | open the selected run's `report.md` in a pager                  |
-| `w`        | toggle the worktree view (every worktree + which agent runs there) |
-| `t`        | open the kanban browser (`p` scope to project, `/` filter)     |
-| `h`        | toggle recent ended sessions (history) in the work pane        |
+| `u` `t` `w` `h` | compatibility aliases for agents/tasks/worktrees/history |
+| `p`        | in Tasks: toggle all tasks vs selected project scope           |
 | `a`        | attach in place: `tmux attach`, else resume the harness        |
 | `r`        | hand off: copy `cd <wt> && <harness> resume` to the clipboard  |
 | `n`        | launch a run: choose task, choose runner, start tmux session   |
@@ -93,7 +98,7 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 | `X`        | untrack the selected project (never deletes the repo)          |
 | `k`        | kill the live session process (SIGTERM, confirms first)        |
 | `g`        | gc merged/stale worktrees via `wt-prune` (confirms first)      |
-| `/`        | filter projects (or tasks) by name or branch                   |
+| `/`        | filter projects, tasks, or tools by current context            |
 | `R`        | force refresh now                                              |
 | `q`        | quit                                                           |
 
@@ -155,7 +160,7 @@ Nothing here is a hard dependency beyond `git`:
 
 ## Commands
 
-- `gvardia` — the three-pane cockpit (projects · sessions · diff).
+- `gvardia` — the tabbed cockpit (projects · agents/tasks/worktrees/tools/history · detail).
 - `gvardia tools --json` — installed/missing agent CLI tools and runner profiles.
 - `gvardia agents --json` — headless fleet dump: projects, worktrees, and the
   agent sessions joined to them.
@@ -180,7 +185,7 @@ internal/tasks/    brain kanban reader + local .gvardia/tasks store
 internal/runs/     local .gvardia/runs store
 internal/prompts/  task-to-agent prompt rendering
 internal/terminal/ tmux launch/attach/kill service
-internal/ui/       Bubble Tea model/update/view (runs cockpit + tasks browser)
+internal/ui/       Bubble Tea model/update/view (tabbed operations cockpit)
 internal/prune/    worktree classification (merged/stale/active)
 docs/              DESIGN.md · PLAN.md · ROADMAP.md · ADAPTERS.md
 ```

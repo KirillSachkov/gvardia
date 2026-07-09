@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/table"
 
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/runners"
 	"github.com/KirillSachkov/gvardia/internal/runs"
 )
 
@@ -131,6 +132,64 @@ func runStatusLabel(status runs.Status) string {
 	default:
 		return "○ pending"
 	}
+}
+
+func taskColumns(width int) []table.Column {
+	const state, project, id = 9, 16, 10
+	title := width - (state + project + id)
+	if title < 16 {
+		title = 16
+	}
+	return []table.Column{
+		{Title: "status", Width: state},
+		{Title: "project", Width: project},
+		{Title: "task", Width: title},
+		{Title: "id", Width: id},
+	}
+}
+
+func taskRow(t model.Task) table.Row {
+	project := t.Project
+	if project == "" {
+		project = "—"
+	}
+	id := t.ID
+	if id == "" {
+		id = "—"
+	}
+	status := t.Status
+	if status == "" {
+		status = "inbox"
+	}
+	return table.Row{status, project, t.Title, id}
+}
+
+func toolColumns(width int) []table.Column {
+	const state, name = 10, 12
+	command := width - (state + name)
+	if command < 16 {
+		command = 16
+	}
+	return []table.Column{
+		{Title: "status", Width: state},
+		{Title: "tool", Width: name},
+		{Title: "command", Width: command},
+	}
+}
+
+func toolRow(tool runners.Tool) table.Row {
+	state := "missing"
+	command := tool.Command
+	if tool.Installed {
+		state = "installed"
+		if tool.Path != "" {
+			command = tool.Path
+		}
+	}
+	if tool.BuiltIn {
+		state += " *"
+	}
+	return table.Row{state, tool.Name, command}
 }
 
 // worktreeColumns returns the worktree-pane columns sized to the given width;
