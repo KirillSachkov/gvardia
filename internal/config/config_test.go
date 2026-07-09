@@ -72,6 +72,33 @@ refresh_interval = "10s"
 	}
 }
 
+func TestLoadCustomToolsAndRunnerProfiles(t *testing.T) {
+	cfg := writeAndLoad(t, `
+[[tools]]
+name = "local-agent"
+command = "local-agent-cli"
+
+[[runner_profiles]]
+name = "local-review"
+tool = "local-agent"
+command_template = "local-agent-cli run {{prompt_path}}"
+`)
+
+	if len(cfg.Tools) != 1 {
+		t.Fatalf("Tools = %d, want 1", len(cfg.Tools))
+	}
+	if cfg.Tools[0].Name != "local-agent" || cfg.Tools[0].Command != "local-agent-cli" {
+		t.Errorf("Tools[0] = %+v, want local-agent/local-agent-cli", cfg.Tools[0])
+	}
+	if len(cfg.RunnerProfiles) != 1 {
+		t.Fatalf("RunnerProfiles = %d, want 1", len(cfg.RunnerProfiles))
+	}
+	got := cfg.RunnerProfiles[0]
+	if got.Name != "local-review" || got.Tool != "local-agent" || got.CommandTemplate != "local-agent-cli run {{prompt_path}}" {
+		t.Errorf("RunnerProfiles[0] = %+v, want configured profile", got)
+	}
+}
+
 func TestLoadExpandsHomeInRoots(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

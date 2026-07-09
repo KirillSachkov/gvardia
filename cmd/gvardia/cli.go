@@ -24,7 +24,7 @@ func usage(fs *flag.FlagSet) func() {
 	return func() {
 		out := fs.Output()
 		fmt.Fprintln(out, "gvardia — a terminal cockpit over your fleet of coding agents.")
-		fmt.Fprintln(out, "\nUsage:\n  gvardia [flags]\n\nFlags:")
+		fmt.Fprintln(out, "\nUsage:\n  gvardia [flags]\n  gvardia agents [--json]\n  gvardia projects [--json]\n  gvardia tasks\n  gvardia tools [--json]\n\nFlags:")
 		fs.PrintDefaults()
 	}
 }

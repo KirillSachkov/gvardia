@@ -32,11 +32,28 @@ type Config struct {
 	// Brain is the root of the personal kanban (sachkov-os); its
 	// tasks/{inbox,active,done}/*.md files are the single task source. "~" is expanded.
 	Brain string `toml:"brain"`
+	// Tools are custom agent CLI tools beyond the built-in tool set.
+	Tools []Tool `toml:"tools"`
+	// RunnerProfiles describe launch commands for built-in or custom tools.
+	RunnerProfiles []RunnerProfile `toml:"runner_profiles"`
 }
 
 // Commands holds overridable paths to the external CLIs gvardia invokes.
 type Commands struct {
 	Lazygit string `toml:"lazygit"`
+}
+
+// Tool is a custom agent CLI declaration from config.
+type Tool struct {
+	Name    string `toml:"name"`
+	Command string `toml:"command"`
+}
+
+// RunnerProfile is a launch profile declaration from config.
+type RunnerProfile struct {
+	Name            string `toml:"name"`
+	Tool            string `toml:"tool"`
+	CommandTemplate string `toml:"command_template"`
 }
 
 // BaseBranch returns the configured base branch for a project, falling back to
