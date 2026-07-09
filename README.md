@@ -19,17 +19,18 @@ viewing, or agent management. It aggregates state and shells out to proven tools
 
 ```
 ┌ PROJECTS ──────────────┬ 1 agents | 2 tasks | 3 worktrees | 4 tools | 5 history ┐
-│▸education-platform 3●  │ AGENTS · runs 2 (1 review) · sessions 3 · worktrees 4 │
-│  se-tutorial      2●   │ status   runner  task              branch        Δ last│
-│  senior-ticker    1○   │ ◆ review claude  Auth cleanup      gvardia/run-1 +90 2m│
-│  OpenTicker       0    │ ● run    codex   Payment bug       gvardia/run-2 +12 7m│
-│  …                      │ ○ idle   claude  edu-da            dev              1h│
+│▸education-platform 3●  │ AGENTS · all projects · runs 3 (1 review)            │
+│  se-tutorial      2●   │ status   project     runner task          changes age │
+│  senior-ticker    1○   │ ◆ review gvardia     codex  Ops console   +90/-12 2m │
+│  OpenTicker       0    │ ✖ fail   content-eng codex  Code map      +2/-0   4m │
+│  …                      │ ● run    platform    codex  Payment bug   +12/-3  7m │
 ├────────────────────────┴──────────────────────────────────────────────────────┤
 │ Auth cleanup                                                                   │
 │ review · claude/claude · gvardia/run-1 · 2m                                    │
 │ report                                                                         │
 │ Done: switched the token claims to snake_case and green-lit the tests.         │
-│ artifacts (3)  M src/Auth.cs · A tests/AuthTests.cs · report.md               │
+│ artifacts  report.md · implementation-plan.md                                  │
+│ changes    3 files · +90 -12 · d open diff                                    │
 ├────────────────────────────────────────────────────────────────────────────────┤
 │ 1 agents · 2 tasks · 3 worktrees · 4 tools · 5 history · enter detail · ? actions│
 └────────────────────────────────────────────────────────────────────────────────┘
@@ -58,7 +59,8 @@ go install github.com/KirillSachkov/gvardia/cmd/wt-prune@latest
 ```
 
 Optional but recommended companions (gvardia degrades gracefully without them):
-`lazygit` and `delta` for diff review, `tmux` for attach.
+`cmux` for new workspaces and Markdown/diff surfaces, `lazygit` and `delta` for
+diff review, and `tmux` for persistent sessions.
 
 ## Quickstart
 
@@ -68,6 +70,8 @@ gvardia tools --json     # installed/missing agent CLIs + runner profiles
 gvardia agents --json    # headless: the whole fleet as JSON (scriptable)
 gvardia projects --json  # headless: projects + worktrees, no agent join
 gvardia tasks            # headless: the kanban, grouped by column
+gvardia task create --title "Fix launch" --project gvardia --body "Reproduce and fix it."
+gvardia task update --id fix-launch --status active
 wt-prune ~/code          # dry-run: list merged / stale worktrees
 wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 ```
@@ -77,8 +81,8 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 | Key        | Action                                                         |
 |------------|----------------------------------------------------------------|
 | `↑↓` `j k` | navigate the focused level (arrows work on any keyboard layout)|
-| `1`        | agents tab: local runs first, live sessions when no runs exist |
-| `2`        | tasks tab: local + brain tasks, optional project scope         |
+| `1`        | agents tab: global attention queue across every project       |
+| `2`        | tasks tab: standalone Gvardia tasks, optional project scope   |
 | `3`        | worktrees tab: every worktree and the agent running there      |
 | `4`        | tools tab: installed/missing agent CLIs                        |
 | `5`        | history tab: live + recent ended sessions                      |
@@ -86,11 +90,13 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 | `esc` `⌫`  | climb back up a level                                          |
 | `tab`      | jump between the projects and active-tab levels                |
 | `?`        | show contextual actions for the current tab                    |
-| `d`        | open the selection's worktree in `lazygit` (fallback: `git diff`) |
+| `d`        | open diff in cmux, lazygit, or git/delta                       |
+| `e`        | browse indexed run artifacts; Enter opens the selection       |
 | `o`        | open the selected run's `report.md` in a pager                  |
 | `u` `t` `w` `h` | compatibility aliases for agents/tasks/worktrees/history |
-| `p`        | in Tasks: toggle all tasks vs selected project scope           |
-| `a`        | attach in place: `tmux attach`, else resume the harness        |
+| `p`        | show or hide the project drawer                               |
+| `s`        | scope Agents or Tasks to the selected project                 |
+| `a`        | attach in a new cmux workspace; fallback copies the command   |
 | `r`        | hand off: copy `cd <wt> && <harness> resume` to the clipboard  |
 | `n`        | launch a run: choose task, choose runner, start tmux session   |
 | `A`        | track an existing repo as a project (curation)                 |
@@ -104,12 +110,39 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 
 Run status glyphs: `● run` · `◆ review` · `✓ done` · `✖ fail` · `■ killed`.
 Session glyphs: `●` busy · `○` idle · `◍` codex · `✓` ended · `✖` failed.
-The `Δ` column is the diff vs the base branch (`+added/-removed`).
+The `changes` column is the compact diff summary (`+added/-removed`).
 
-**Local tasks and runs.** Project-local tasks live in `.gvardia/tasks/*.md`.
-Launching a run creates `.gvardia/runs/<run-id>/prompt.md`, `meta.json`, and
-`report.md`, creates a linked git worktree, and starts the selected agent command
-inside a detached tmux session. The gvardia TUI stays open.
+**Local tasks and runs.** Gvardia owns its state outside project repositories.
+The default data directory is `$XDG_DATA_HOME/gvardia`, falling back to
+`~/.local/share/gvardia`. Tasks live in `tasks/*.md`; each run gets a directory
+under `runs/<run-id>/` with its prompt, status, event log, indexed artifacts, and
+final report. Existing project-local `.gvardia/runs` directories remain readable
+as legacy data.
+
+Launching creates a linked git worktree and starts the selected agent inside a
+detached tmux session. Codex is the default runner and uses `-a never -s
+danger-full-access`. Gvardia checks the tmux pane immediately and on each refresh,
+so a dead process cannot remain marked as running. tmux keeps ownership of the
+session; cmux only opens a new workspace for presentation. The Gvardia TUI stays
+open.
+
+### Agent evidence contract
+
+Each launched agent receives `GVARDIA_RUN_DIR`, `GVARDIA_REPORT_PATH`,
+`GVARDIA_STATUS_PATH`, `GVARDIA_EVENTS_PATH`, and `GVARDIA_ARTIFACTS_DIR`. The
+generated prompt asks the agent to report meaningful phase changes, save useful
+review material, run verification, and finish with a short structured report.
+
+```bash
+gvardia run status --state running --phase tests --summary "Running Go tests"
+gvardia run event --type status --message "Implementation complete"
+gvardia run artifact --type plan --title "Implementation plan" --file /tmp/plan.md
+gvardia run report --file /tmp/report.md
+```
+
+The final report uses `Summary`, `Changes`, `Verification`, and `Risks / Next
+steps`. An agent may create follow-up work with `gvardia task create`, but
+Gvardia never launches that follow-up automatically.
 
 **Curation.** By default gvardia scans `roots` for repos. Press `A`/`C` to track
 specific projects instead; the tracked list lives in
@@ -122,9 +155,17 @@ key is optional; the defaults are shown below.
 
 ```toml
 roots = ["~/code"]                 # dirs scanned when no projects are curated
-brain = "~/Work/sachkov-os"        # kanban source: tasks/{inbox,active,done}/*.md
 refresh_interval = "5s"            # how often the cockpit re-collects
 adapters = ["claude", "codex", "tmux"]
+data_dir = "~/.local/share/gvardia"
+task_sources = ["gvardia"]         # add "brain" only when explicit import is useful
+brain = "~/Work/sachkov-os"        # optional source used by task_sources = ["gvardia", "brain"]
+default_runner = "codex"
+
+[terminal]
+backend = "auto"                   # auto, cmux, or copy
+open_on_launch = true
+focus_new = true
 
 [base]                             # base branch per project for diff + ahead/behind
 default = "auto"                   # auto = dev if it exists, else main
@@ -152,8 +193,10 @@ Nothing here is a hard dependency beyond `git`:
 
 - An absent adapter CLI (`claude`, `codex`) or a stopped `tmux` server is skipped
   with a banner. A partial fleet beats no fleet.
-- No `lazygit`? `enter` falls back to `git diff` through `delta` (or the default
+- No `lazygit`? `d` falls back to `git diff` through `delta` (or the default
   pager).
+- No `cmux`? Launch and attach copy `tmux attach -t <target>` instead of taking
+  over the terminal that runs Gvardia.
 - Missing runner tools show up as missing in `gvardia tools --json`; they do not
   break the cockpit.
 - Per-repo git errors are skipped, never fatal to the whole scan.
@@ -165,7 +208,11 @@ Nothing here is a hard dependency beyond `git`:
 - `gvardia agents --json` — headless fleet dump: projects, worktrees, and the
   agent sessions joined to them.
 - `gvardia projects --json` — the git-only view (worktrees + status, no agents).
-- `gvardia tasks` — dump the kanban (from `brain`) grouped by column.
+- `gvardia tasks` — dump tasks from configured sources.
+- `gvardia task create` / `gvardia task update` — let a human or agent write to
+  the standalone Gvardia task store.
+- `gvardia run status|event|artifact|report` — write structured evidence for the
+  active run using `GVARDIA_RUN_DIR`.
 - `wt-prune [roots…]` — worktree GC across your roots. Dry-run by default;
   `--yes` removes merged worktrees, `--stale` also removes stale ones, `--days N`
   sets the staleness threshold. Never touches a primary or dirty worktree.
@@ -181,10 +228,10 @@ internal/adapters/ pluggable per-harness status: claude, codex, tmux, …
 internal/model/    Project / Worktree / Session / Task domain types
 internal/history/  ended-session summaries + reports from agent transcripts
 internal/runners/  installed agent tool discovery + runner profiles
-internal/tasks/    brain kanban reader + local .gvardia/tasks store
-internal/runs/     local .gvardia/runs store
+internal/tasks/    standalone Markdown task store + optional brain reader
+internal/runs/     XDG run envelope store + legacy project reader
 internal/prompts/  task-to-agent prompt rendering
-internal/terminal/ tmux launch/attach/kill service
+internal/terminal/ tmux lifecycle + cmux presentation services
 internal/ui/       Bubble Tea model/update/view (tabbed operations cockpit)
 internal/prune/    worktree classification (merged/stale/active)
 docs/              DESIGN.md · PLAN.md · ROADMAP.md · ADAPTERS.md

@@ -4,6 +4,12 @@ A terminal cockpit over a fleet of coding agents, across all projects,
 agent-agnostic. This document is the source of truth for architecture and scope.
 The build plan lives in `PLAN.md`; future directions in `ROADMAP.md`.
 
+The v1 architecture below remains the base. The current Agent Operations
+extension is specified in
+`docs/superpowers/specs/2026-07-09-agent-operations-redesign.md`: a global managed
+run queue, standalone XDG state, tmux lifecycle reconciliation, cmux handoff, and
+indexed evidence. It preserves the same thin-router boundary.
+
 ## 1. Problem & principles
 
 **Problem.** Running many agents in parallel is solved (harness built-ins +
@@ -18,12 +24,13 @@ single-repo (workmux, claude-squad), GUI (Orca, jean), or single-harness
    (`lazygit`, `delta`, `tmux`, the agent CLIs).
 2. **Agent-agnostic core.** Source of truth = `git` (worktrees, branches,
    commits) + `tmux` + tracker. Per-harness knowledge lives only in **adapters**.
-3. **Cross-project first.** The top-level object is the *project list*; a fleet
-   spans every configured root, not one repo.
+3. **Cross-project first.** The default work view is a global attention queue;
+   the project list filters and supplies launch context.
 4. **YAGNI.** v1 does exactly: see projects × sessions × statuses × diff, and act
    (attach / new / resume / kill / gc). Everything else is `ROADMAP.md`.
-5. **Read-mostly, cheap, restartable.** All reads are re-derivable from git +
-   process state; the tool holds no durable state of its own beyond config.
+5. **Small durable envelope.** Git and process state remain ground truth for
+   code and liveness. Gvardia stores task, run, event, artifact, and report
+   metadata under the platform data directory so work survives restarts.
 
 ## 2. Tech choice
 
@@ -126,6 +133,19 @@ Three panes + footer (see README mockup):
 Suspend/resume pattern for `enter`/`a`: use `tea.Exec` (Bubble Tea) to hand the
 terminal to the child process and return cleanly.
 
+### Current operations mode
+
+- Agents defaults to all managed runs across projects, ordered by review,
+  failure, running, then completed state.
+- The project drawer remains available as an explicit scope and launch context.
+- tmux owns persistent sessions. cmux opens a separate workspace for attach, so
+  Gvardia remains visible. Missing cmux falls back to a copied attach command.
+- Artifacts are indexed run outputs such as reports, plans, notes, images, and
+  logs. Changed files are a separate compact summary. `d` delegates review to
+  cmux, lazygit, or git/delta.
+- Every active run is reconciled against tmux on refresh. A missing or dead pane
+  becomes review when a report exists, otherwise failed.
+
 ## 5. Configuration
 
 `~/.config/gvardia/config.toml`:
@@ -134,6 +154,14 @@ terminal to the child process and return cleanly.
 roots = ["~/code"]              # dirs scanned for git repos (recursively, shallow)
 refresh_interval = "5s"
 adapters = ["claude", "codex", "tmux"]
+data_dir = "~/.local/share/gvardia"
+task_sources = ["gvardia"]
+default_runner = "codex"
+
+[terminal]
+backend = "auto"
+open_on_launch = true
+focus_new = true
 
 [base]                          # base branch per project for diff/ahead-behind
 default = "auto"               # auto = dev if exists else main
@@ -143,11 +171,11 @@ default = "auto"               # auto = dev if exists else main
 lazygit = "lazygit"
 ```
 
-## 6. Non-goals (v1)
+## 6. Non-goals
 
 - No orchestration / inter-agent messaging (commodity: `claude` agent teams).
 - No custom diff/merge UI (delegate to lazygit).
-- No cloud/remote agents, no web UI, no kanban board (see ROADMAP).
+- No cloud/remote agents, no web UI, and no autonomous kanban dispatcher.
 - No MR/CI enrichment yet (ROADMAP: `gh`/`glab` join).
 
 ## 7. Distribution

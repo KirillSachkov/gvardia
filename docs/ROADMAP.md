@@ -4,6 +4,13 @@ v1 (see `PLAN.md`) is deliberately minimal: projects × sessions × statuses × 
 plus attach/new/resume/kill/gc. These are the growth directions once v1 is solid.
 Each is independent — pull the next most useful, don't build ahead of need.
 
+## Shipped after v1
+
+- A flat global queue of managed runs across projects, sorted by attention.
+- Standalone Markdown tasks and JSON/JSONL run evidence under the XDG data dir.
+- Reports and typed artifacts with a selectable artifact browser.
+- tmux-backed launches with cmux presentation and liveness reconciliation.
+
 ## Near-term
 
 - **Live-watch mode** — push-based refresh instead of polling: watch `~/.claude`
@@ -12,17 +19,13 @@ Each is independent — pull the next most useful, don't build ahead of need.
 - **Tracker enrichment (MR/CI)** — per branch, join open MR + pipeline status via
   `gh` / `glab` (cached, lazy). New column: `MR#123 ✓ / ✗ / ⏳`. Answers "which
   agent's work is ready / failed validation."
-- **Status-table view** (idea from `uzi ls`) — a flat, sortable, `--watch`-able
-  table of every agent across all projects (harness, status, branch, +/-, addr),
-  as an alternate top-level view (`v` toggles panes ↔ table).
 - **Cross-repo scan parity** (idea from `gwq`) — treat worktrees globally, not
   per-project; `gvardia status --json/--csv` as a machine feed others can pipe.
 
 ## Provenance / reports
 
-- **REVIEW.md manifest** — a convention (and a `gvardia review <branch>` helper)
-  where an agent leaves a per-run report (what/why/risk/tests). Surface it in the
-  diff pane so "agent's report" sits next to the diff.
+- **Review runs** — launch a second bounded run against the first run's report and
+  diff, then link both runs to the same task without automatic orchestration.
 - **Commit-trailer awareness** — parse `Assisted-by:` / `Co-Authored-By:` trailers
   to attribute worktrees to the agent/model that produced them.
 
