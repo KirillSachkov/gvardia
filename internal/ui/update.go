@@ -252,6 +252,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		return m.toggleProjectsDrawer()
 	case "s":
+		if m.activeTab == tabAgents {
+			m.agentScopeProject = !m.agentScopeProject
+			m.sessions.SetCursor(0)
+			m.rebuildSessions()
+			return m, m.diffForSelection()
+		}
 		if m.activeTab == tabTasks {
 			m.taskScope = !m.taskScope
 			m.sessions.SetCursor(0)

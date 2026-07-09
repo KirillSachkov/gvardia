@@ -124,19 +124,20 @@ func (m Model) workPaneView() string {
 }
 
 func (m Model) workPaneTitle() string {
-	p := m.selectedProject()
 	runsCount, reviewCount := 0, 0
-	if p != nil {
-		for _, r := range m.runsByProject[p.Path] {
-			runsCount++
-			if r.Status == runs.StatusReview {
-				reviewCount++
-			}
+	for _, r := range m.agentRuns() {
+		runsCount++
+		if r.Status == runs.StatusReview {
+			reviewCount++
 		}
 	}
+	scope := "all projects"
+	if m.agentScopeProject {
+		scope = "selected project"
+	}
 	active := m.activeTabLabel()
-	return dim.Render(fmt.Sprintf(" %s · runs %d (%d review) · sessions %d · worktrees %d ",
-		strings.ToUpper(active), runsCount, reviewCount, len(m.sessionList), len(m.worktreeList)))
+	return dim.Render(fmt.Sprintf(" %s · %s · runs %d (%d review) · sessions %d · worktrees %d ",
+		strings.ToUpper(active), scope, runsCount, reviewCount, len(m.sessionList), len(m.worktreeList)))
 }
 
 func (m Model) tabsLine() string {
@@ -424,7 +425,7 @@ func (m Model) contextFooter() string {
 	case tabHistory:
 		return base + " · tab/shift+tab pane · p projects · enter actions · d diff · a attach"
 	default:
-		return base + " · tab/shift+tab pane · p projects · enter actions · a attach · d diff · o report · n launch"
+		return base + " · tab/shift+tab pane · p projects · enter actions · s scope · a attach · d diff · o report · n launch"
 	}
 }
 

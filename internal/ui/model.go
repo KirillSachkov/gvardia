@@ -4,6 +4,7 @@
 package ui
 
 import (
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -63,23 +64,24 @@ type Model struct {
 	banner    string // last adapter/collector error, shown in the footer area
 	toast     string // transient success note (e.g. clipboard copy), cleared on next key
 
-	showHistory      bool                       // include ended sessions in the work pane
-	historyByProject map[string][]model.Session // lazily loaded, keyed by project path
-	runsByProject    map[string][]runs.Run      // local gvardia runs, keyed by project path
-	runList          []runs.Run                 // rows currently shown when the runs view is active
-	sessionList      []model.Session            // rows currently in the work table (cursor maps here)
-	worktreeView     bool                       // legacy compatibility flag for tabWorktrees
-	runsView         bool                       // legacy compatibility flag for tabAgents
-	worktreeList     []model.Worktree           // rows in the worktree view (cursor maps here)
-	taskList         []model.Task               // rows in the tasks tab (cursor maps here)
-	toolList         []runners.Tool             // rows in the tools tab (cursor maps here)
-	curated          bool                       // true when showing a curated tracked list (not a roots scan)
-	tools            []runners.Tool             // installed/missing agent tools
-	profiles         []runners.RunnerProfile    // runner profiles
-	activeTab        workTab                    // selected right-pane tab
-	showProjects     bool                       // whether the left projects drawer is visible
-	showActions      bool                       // true while contextual actions help is open
-	actionMenu       *actionMenu                // contextual actions for the selected item
+	showHistory       bool                       // include ended sessions in the work pane
+	agentScopeProject bool                       // limit the Agents queue to the selected project
+	historyByProject  map[string][]model.Session // lazily loaded, keyed by project path
+	runsByProject     map[string][]runs.Run      // local gvardia runs, keyed by project path
+	runList           []runs.Run                 // rows currently shown when the runs view is active
+	sessionList       []model.Session            // rows currently in the work table (cursor maps here)
+	worktreeView      bool                       // legacy compatibility flag for tabWorktrees
+	runsView          bool                       // legacy compatibility flag for tabAgents
+	worktreeList      []model.Worktree           // rows in the worktree view (cursor maps here)
+	taskList          []model.Task               // rows in the tasks tab (cursor maps here)
+	toolList          []runners.Tool             // rows in the tools tab (cursor maps here)
+	curated           bool                       // true when showing a curated tracked list (not a roots scan)
+	tools             []runners.Tool             // installed/missing agent tools
+	profiles          []runners.RunnerProfile    // runner profiles
+	activeTab         workTab                    // selected right-pane tab
+	showProjects      bool                       // whether the left projects drawer is visible
+	showActions       bool                       // true while contextual actions help is open
+	actionMenu        *actionMenu                // contextual actions for the selected item
 
 	confirm    *confirmPrompt  // non-nil while a y/n confirmation is pending
 	prompt     *newAgentPrompt // non-nil while the new-agent form is open
@@ -259,8 +261,17 @@ func (m *Model) worktreeFor(s *model.Session) *model.Worktree {
 }
 
 func (m *Model) worktreeForRun(r *runs.Run) *model.Worktree {
-	p := m.selectedProject()
-	if p == nil || r == nil {
+	if r == nil {
+		return nil
+	}
+	var p *model.Project
+	for i := range m.projects {
+		if m.projects[i].Path == r.ProjectPath {
+			p = &m.projects[i]
+			break
+		}
+	}
+	if p == nil {
 		return nil
 	}
 	for i := range p.Worktrees {
@@ -393,7 +404,7 @@ func (m *Model) rebuildSessions() {
 			}
 			break
 		}
-		list := m.runsByProject[p.Path]
+		list := m.agentRuns()
 		m.runList = list
 		rows = make([]table.Row, len(list))
 		for i, r := range list {
@@ -410,8 +421,48 @@ func (m *Model) showingRuns() bool {
 	if m.activeTab != tabAgents || !m.runsView {
 		return false
 	}
-	p := m.selectedProject()
-	return p != nil && len(m.runsByProject[p.Path]) > 0
+	for _, list := range m.runsByProject {
+		if len(list) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) agentRuns() []runs.Run {
+	var out []runs.Run
+	if m.agentScopeProject {
+		if p := m.selectedProject(); p != nil {
+			out = append(out, m.runsByProject[p.Path]...)
+		}
+	} else {
+		for _, list := range m.runsByProject {
+			out = append(out, list...)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		pi, pj := runAttention(out[i].Status), runAttention(out[j].Status)
+		if pi != pj {
+			return pi < pj
+		}
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	return out
+}
+
+func runAttention(status runs.Status) int {
+	switch status {
+	case runs.StatusReview:
+		return 0
+	case runs.StatusFailed:
+		return 1
+	case runs.StatusRunning, runs.StatusPending:
+		return 2
+	case runs.StatusDone:
+		return 3
+	default:
+		return 4
+	}
 }
 
 func (m *Model) filteredTasks() []model.Task {

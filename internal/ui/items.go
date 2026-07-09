@@ -47,19 +47,15 @@ func (p projectItem) matches(q string) bool {
 // sessionColumns returns the work-pane columns sized to the given width; branch
 // absorbs the slack.
 func sessionColumns(width int) []table.Column {
-	const state, harness, agent, task, delta, last = 2, 7, 16, 6, 9, 5
-	branch := width - (state + harness + agent + task + delta + last)
-	if branch < 8 {
-		branch = 8
-	}
+	w := proportionalWidths(width, []int{2, 7, 16, 6, 20, 9, 5})
 	return []table.Column{
-		{Title: "", Width: state},
-		{Title: "harness", Width: harness},
-		{Title: "agent", Width: agent},
-		{Title: "task", Width: task},
-		{Title: "branch", Width: branch},
-		{Title: "Δ", Width: delta},
-		{Title: "last", Width: last},
+		{Title: "", Width: w[0]},
+		{Title: "harness", Width: w[1]},
+		{Title: "agent", Width: w[2]},
+		{Title: "task", Width: w[3]},
+		{Title: "branch", Width: w[4]},
+		{Title: "changes", Width: w[5]},
+		{Title: "age", Width: w[6]},
 	}
 }
 
@@ -81,19 +77,15 @@ func sessionRow(s model.Session) table.Row {
 }
 
 func runColumns(width int) []table.Column {
-	const state, runner, task, delta, tmux, last = 8, 10, 24, 9, 18, 5
-	branch := width - (state + runner + task + delta + tmux + last)
-	if branch < 8 {
-		branch = 8
-	}
+	w := proportionalWidths(width, []int{8, 12, 8, 22, 18, 9, 5})
 	return []table.Column{
-		{Title: "status", Width: state},
-		{Title: "runner", Width: runner},
-		{Title: "task", Width: task},
-		{Title: "branch", Width: branch},
-		{Title: "Δ", Width: delta},
-		{Title: "terminal", Width: tmux},
-		{Title: "last", Width: last},
+		{Title: "status", Width: w[0]},
+		{Title: "project", Width: w[1]},
+		{Title: "runner", Width: w[2]},
+		{Title: "task", Width: w[3]},
+		{Title: "branch", Width: w[4]},
+		{Title: "changes", Width: w[5]},
+		{Title: "age", Width: w[6]},
 	}
 }
 
@@ -106,15 +98,12 @@ func runRow(r runs.Run) table.Row {
 	if branch == "" {
 		branch = "(none)"
 	}
-	tmux := r.TmuxTarget
-	if tmux == "" {
-		tmux = "—"
-	}
+	project := valueOr(r.Project, "—")
 	delta := ""
 	if r.ChangeStat.Files > 0 {
 		delta = fmt.Sprintf("+%d/-%d", r.ChangeStat.Added, r.ChangeStat.Removed)
 	}
-	return table.Row{runStatusLabel(r.Status), r.Runner, task, branch, delta, tmux, relativeTime(r.UpdatedAt)}
+	return table.Row{runStatusLabel(r.Status), project, r.Runner, task, branch, delta, relativeTime(r.UpdatedAt)}
 }
 
 func runStatusLabel(status runs.Status) string {
@@ -135,16 +124,12 @@ func runStatusLabel(status runs.Status) string {
 }
 
 func taskColumns(width int) []table.Column {
-	const state, project, id = 9, 16, 10
-	title := width - (state + project + id)
-	if title < 16 {
-		title = 16
-	}
+	w := proportionalWidths(width, []int{9, 16, 30, 10})
 	return []table.Column{
-		{Title: "status", Width: state},
-		{Title: "project", Width: project},
-		{Title: "task", Width: title},
-		{Title: "id", Width: id},
+		{Title: "status", Width: w[0]},
+		{Title: "project", Width: w[1]},
+		{Title: "task", Width: w[2]},
+		{Title: "id", Width: w[3]},
 	}
 }
 
@@ -165,15 +150,11 @@ func taskRow(t model.Task) table.Row {
 }
 
 func toolColumns(width int) []table.Column {
-	const state, name = 10, 12
-	command := width - (state + name)
-	if command < 16 {
-		command = 16
-	}
+	w := proportionalWidths(width, []int{10, 12, 40})
 	return []table.Column{
-		{Title: "status", Width: state},
-		{Title: "tool", Width: name},
-		{Title: "command", Width: command},
+		{Title: "status", Width: w[0]},
+		{Title: "tool", Width: w[1]},
+		{Title: "command", Width: w[2]},
 	}
 }
 
@@ -195,19 +176,54 @@ func toolRow(tool runners.Tool) table.Row {
 // worktreeColumns returns the worktree-pane columns sized to the given width;
 // branch absorbs the slack.
 func worktreeColumns(width int) []table.Column {
-	const state, ab, delta, agent, commit = 2, 7, 9, 14, 6
-	branch := width - (state + ab + delta + agent + commit)
-	if branch < 8 {
-		branch = 8
-	}
+	w := proportionalWidths(width, []int{2, 24, 7, 9, 14, 6})
 	return []table.Column{
-		{Title: "", Width: state},
-		{Title: "branch", Width: branch},
-		{Title: "±", Width: ab},
-		{Title: "Δ", Width: delta},
-		{Title: "agent", Width: agent},
-		{Title: "commit", Width: commit},
+		{Title: "", Width: w[0]},
+		{Title: "branch", Width: w[1]},
+		{Title: "sync", Width: w[2]},
+		{Title: "changes", Width: w[3]},
+		{Title: "agent", Width: w[4]},
+		{Title: "age", Width: w[5]},
 	}
+}
+
+// proportionalWidths reserves the default Bubbles table cell padding before
+// distributing the remaining content width by weight.
+func proportionalWidths(width int, weights []int) []int {
+	n := len(weights)
+	if n == 0 {
+		return nil
+	}
+	budget := width - 2*n
+	if budget < n {
+		budget = n
+	}
+	widths := make([]int, n)
+	for i := range widths {
+		widths[i] = 1
+	}
+	remaining := budget - n
+	totalWeight := 0
+	for _, weight := range weights {
+		if weight > 0 {
+			totalWeight += weight
+		}
+	}
+	if totalWeight == 0 {
+		widths[0] += remaining
+		return widths
+	}
+	used := 0
+	for i, weight := range weights {
+		extra := remaining * weight / totalWeight
+		widths[i] += extra
+		used += extra
+	}
+	for i := 0; used < remaining; i = (i + 1) % n {
+		widths[i]++
+		used++
+	}
+	return widths
 }
 
 // worktreeRow2 renders one worktree as a table row, marking whether a live agent

@@ -4,8 +4,11 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/table"
+
 	"github.com/KirillSachkov/gvardia/internal/adapters"
 	"github.com/KirillSachkov/gvardia/internal/model"
+	"github.com/KirillSachkov/gvardia/internal/runs"
 )
 
 func TestProjectItemMatches(t *testing.T) {
@@ -95,5 +98,44 @@ func TestFailureBanner(t *testing.T) {
 	got := failureBanner([]adapters.Failure{{Adapter: "tmux"}, {Adapter: "codex"}})
 	if got != "adapters skipped: tmux, codex" {
 		t.Errorf("banner = %q", got)
+	}
+}
+
+func TestRunRowIncludesProject(t *testing.T) {
+	row := runRow(runs.Run{Project: "gvardia", Runner: "codex", TaskTitle: "Reliable launch", Branch: "gvardia/run-1"})
+	if len(row) != 7 {
+		t.Fatalf("run row cells = %d, want 7", len(row))
+	}
+	if row[1] != "gvardia" || row[2] != "codex" {
+		t.Fatalf("run row = %v, want project then runner", row)
+	}
+}
+
+func TestTableColumnsFitCellPadding(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		columns []table.Column
+		width   int
+	}{
+		{"sessions", sessionColumns(80), 80},
+		{"runs", runColumns(80), 80},
+		{"tasks", taskColumns(80), 80},
+		{"tools", toolColumns(80), 80},
+		{"worktrees", worktreeColumns(80), 80},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			total := 2 * len(tc.columns)
+			for _, column := range tc.columns {
+				total += column.Width
+			}
+			if total > tc.width {
+				t.Fatalf("columns consume %d cells including padding, width is %d: %+v", total, tc.width, tc.columns)
+			}
+			for _, column := range tc.columns {
+				if column.Title == "Δ" {
+					t.Fatal("ambiguous delta column title must be replaced")
+				}
+			}
+		})
 	}
 }

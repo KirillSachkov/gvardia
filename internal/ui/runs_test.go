@@ -59,6 +59,34 @@ func TestRunsViewShowsRunsAndReport(t *testing.T) {
 	}
 }
 
+func TestAgentsTabDefaultsToGlobalAttentionQueue(t *testing.T) {
+	m := readyWithRuns(t)
+	m.runsByProject["/r/beta"] = []runs.Run{
+		{ID: "run-running", Project: "beta", ProjectPath: "/r/beta", TaskTitle: "Running beta", Runner: "codex", Status: runs.StatusRunning, UpdatedAt: time.Now()},
+		{ID: "run-failed", Project: "beta", ProjectPath: "/r/beta", TaskTitle: "Failed beta", Runner: "codex", Status: runs.StatusFailed, UpdatedAt: time.Now().Add(-time.Minute)},
+	}
+	m.rebuildSessions()
+
+	if m.agentScopeProject {
+		t.Fatal("agents scope should default to all projects")
+	}
+	if len(m.runList) != 3 {
+		t.Fatalf("global queue runs = %d, want 3", len(m.runList))
+	}
+	if m.runList[0].Status != runs.StatusReview || m.runList[1].Status != runs.StatusFailed {
+		t.Fatalf("queue order = %v, %v; want review then failed", m.runList[0].Status, m.runList[1].Status)
+	}
+	out := m.render()
+	if !strings.Contains(out, "gvardia") || !strings.Contains(out, "beta") {
+		t.Fatalf("global queue should show both project names:\n%s", out)
+	}
+
+	m, _ = step(m, keyText("s"))
+	if !m.agentScopeProject || len(m.runList) != 1 || m.runList[0].Project != "alpha" {
+		t.Fatalf("project scope = %v, runs = %+v; want selected alpha only", m.agentScopeProject, m.runList)
+	}
+}
+
 func TestRunsViewSplitsSummaryReportAndArtifactsIntoSeparatePanes(t *testing.T) {
 	m := readyWithRuns(t)
 	out := m.render()
