@@ -2,14 +2,14 @@
 
 **Command your fleet of coding agents from the terminal.**
 
-`gvardia` is a terminal cockpit (TUI) that gives you one screen over every coding
-agent working across **all** your projects: which projects are in flight, which
-agents are running (Claude Code, Codex, …), what they changed, and their status,
-without juggling ten different commands.
+`gvardia` is a local Agent Operations Console. It gives you one terminal screen
+over your projects, tasks, installed agent CLIs, local runs, tmux sessions, diffs,
+reports, artifacts, and history.
 
-It is **agent-agnostic** by design. The source of truth is `git` + `tmux`, and
-per-harness status comes from **pluggable adapters** (`claude`, `codex`, `tmux`).
-Any agent that runs in a git worktree and leaves commits behind shows up.
+It is **agent-agnostic** by design. The source of truth is `git` + `tmux`.
+Per-harness status still comes from adapters (`claude`, `codex`, `tmux`), and new
+local runs use runner profiles for `claude`, `codex`, `gemini`, `opencode`,
+`aider`, `goose`, or custom commands from config.
 
 `gvardia` is a thin router, not an orchestrator. It never reimplements git, diff
 viewing, or agent management. It aggregates state and shells out to proven tools
@@ -35,13 +35,11 @@ viewing, or agent management. It aggregates state and shells out to proven tools
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Each row is one agent session: live agents first (honest process-backed status),
-then recent **ended** sessions when you press `h`. `enter` drills a level deeper
-(projects → sessions → detail), `esc` climbs back. The summary is the agent's own
-session title, the **report** is its last message, and **artifacts** are the files
-it changed — all pulled from the transcript and `git`. The task is linked from your
-kanban (or inferred from the branch). Press `w` for the worktree view, `t` for the
-kanban, `d` for `lazygit`. Keybinds work under a Russian (ЙЦУКЕН) layout too.
+The main work pane now prefers local gvardia runs when they exist. A run has a
+task, runner profile, worktree, tmux target, diff stat, report, and artifacts.
+Existing live sessions and history are still available. Press `u` for runs, `w`
+for worktrees, `h` for ended sessions, `t` for tasks, and `d` for `lazygit`.
+Keybinds work under a Russian (ЙЦУКЕН) layout too.
 
 ## Install
 
@@ -65,6 +63,7 @@ Optional but recommended companions (gvardia degrades gracefully without them):
 
 ```bash
 gvardia                  # launch the cockpit
+gvardia tools --json     # installed/missing agent CLIs + runner profiles
 gvardia agents --json    # headless: the whole fleet as JSON (scriptable)
 gvardia projects --json  # headless: projects + worktrees, no agent join
 gvardia tasks            # headless: the kanban, grouped by column
@@ -80,13 +79,15 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 | `enter`    | drill down a level (projects → sessions → detail)              |
 | `esc` `⌫`  | climb back up a level                                          |
 | `tab`      | jump between the projects and sessions levels                  |
+| `u`        | show local gvardia runs for the selected project                |
 | `d`        | open the selection's worktree in `lazygit` (fallback: `git diff`) |
+| `o`        | open the selected run's `report.md` in a pager                  |
 | `w`        | toggle the worktree view (every worktree + which agent runs there) |
 | `t`        | open the kanban browser (`p` scope to project, `/` filter)     |
 | `h`        | toggle recent ended sessions (history) in the work pane        |
 | `a`        | attach in place: `tmux attach`, else resume the harness        |
 | `r`        | hand off: copy `cd <wt> && <harness> resume` to the clipboard  |
-| `n`        | new agent: pick a harness, name it, spawn it                   |
+| `n`        | launch a run: choose task, choose runner, start tmux session   |
 | `A`        | track an existing repo as a project (curation)                 |
 | `C`        | create a new project (`git init`) and track it                 |
 | `X`        | untrack the selected project (never deletes the repo)          |
@@ -96,8 +97,14 @@ wt-prune --yes ~/code    # remove merged worktrees (never primary or dirty)
 | `R`        | force refresh now                                              |
 | `q`        | quit                                                           |
 
-Status glyphs: `●` busy · `○` idle · `◍` codex · `✓` ended (history) · `✖` failed.
-The `Δ` column is the session's diff vs its base branch (`+added/-removed`).
+Run status glyphs: `● run` · `◆ review` · `✓ done` · `✖ fail` · `■ killed`.
+Session glyphs: `●` busy · `○` idle · `◍` codex · `✓` ended · `✖` failed.
+The `Δ` column is the diff vs the base branch (`+added/-removed`).
+
+**Local tasks and runs.** Project-local tasks live in `.gvardia/tasks/*.md`.
+Launching a run creates `.gvardia/runs/<run-id>/prompt.md`, `meta.json`, and
+`report.md`, creates a linked git worktree, and starts the selected agent command
+inside a detached tmux session. The gvardia TUI stays open.
 
 **Curation.** By default gvardia scans `roots` for repos. Press `A`/`C` to track
 specific projects instead; the tracked list lives in
@@ -120,6 +127,15 @@ default = "auto"                   # auto = dev if it exists, else main
 
 [commands]
 lazygit = "lazygit"                # override the lazygit binary/path
+
+[[tools]]
+name = "my-agent"
+command = "my-agent-cli"
+
+[[runner_profiles]]
+name = "my-agent"
+tool = "my-agent"
+command_template = "my-agent-cli {{prompt_path}}"
 ```
 
 The curated project list is managed by the TUI (`A`/`C`/`X`) in a separate file,
@@ -133,11 +149,14 @@ Nothing here is a hard dependency beyond `git`:
   with a banner. A partial fleet beats no fleet.
 - No `lazygit`? `enter` falls back to `git diff` through `delta` (or the default
   pager).
+- Missing runner tools show up as missing in `gvardia tools --json`; they do not
+  break the cockpit.
 - Per-repo git errors are skipped, never fatal to the whole scan.
 
 ## Commands
 
 - `gvardia` — the three-pane cockpit (projects · sessions · diff).
+- `gvardia tools --json` — installed/missing agent CLI tools and runner profiles.
 - `gvardia agents --json` — headless fleet dump: projects, worktrees, and the
   agent sessions joined to them.
 - `gvardia projects --json` — the git-only view (worktrees + status, no agents).
@@ -156,8 +175,12 @@ internal/collect/  worktree + git-status collectors (concurrent)
 internal/adapters/ pluggable per-harness status: claude, codex, tmux, …
 internal/model/    Project / Worktree / Session / Task domain types
 internal/history/  ended-session summaries + reports from agent transcripts
-internal/tasks/    kanban reader (brain tasks/{inbox,active,done}/*.md)
-internal/ui/       Bubble Tea model/update/view (cockpit + tasks browser)
+internal/runners/  installed agent tool discovery + runner profiles
+internal/tasks/    brain kanban reader + local .gvardia/tasks store
+internal/runs/     local .gvardia/runs store
+internal/prompts/  task-to-agent prompt rendering
+internal/terminal/ tmux launch/attach/kill service
+internal/ui/       Bubble Tea model/update/view (runs cockpit + tasks browser)
 internal/prune/    worktree classification (merged/stale/active)
 docs/              DESIGN.md · PLAN.md · ROADMAP.md · ADAPTERS.md
 ```

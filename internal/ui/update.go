@@ -81,8 +81,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(msg)
 	}
 	return m, nil
+}
+
+func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.showTasks {
+		var cmd tea.Cmd
+		m.tasksVP, cmd = m.tasksVP.Update(msg)
+		return m, cmd
+	}
+	if m.level == levelDetail {
+		var cmd tea.Cmd
+		m.diff, cmd = m.diff.Update(msg)
+		return m, cmd
+	}
+	var cmd tea.Cmd
+	if m.level == levelProjects {
+		m.projList, cmd = m.projList.Update(msg)
+	} else {
+		m.sessions, cmd = m.sessions.Update(msg)
+	}
+	return m, cmd
 }
 
 // handleKey routes a key press. Modals (confirm, new-agent) take priority, then
@@ -129,6 +152,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if w := m.selectionWorktree(); w != nil {
 			return m, enterDiff(*w, m.cfg)
 		}
+		return m, nil
+	case "o":
+		if r := m.selectedRun(); r != nil {
+			return m, enterReport(r.ReportPath)
+		}
+		m.banner = "no run report selected"
 		return m, nil
 	case "u":
 		m.runsView = true
@@ -371,7 +400,7 @@ func (m *Model) layout() {
 	m.projList.SetSize(g.leftInnerW, g.leftInnerH)
 	m.applyColumns()
 	m.sessions.SetWidth(g.rightInnerW)
-	m.sessions.SetHeight(g.sessInnerH)
+	m.sessions.SetHeight(max1(g.sessInnerH - 1))
 	m.diff.SetWidth(g.rightInnerW)
 	m.diff.SetHeight(g.diffInnerH)
 

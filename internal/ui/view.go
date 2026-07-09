@@ -58,6 +58,7 @@ func (m Model) geometry() geo {
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -77,12 +78,37 @@ func (m Model) render() string {
 	}
 
 	left := pane(m.level == levelProjects, m.projList.View())
-	sess := pane(m.level == levelWork, m.sessions.View())
+	sess := pane(m.level == levelWork, m.workPaneView())
 	diff := pane(m.level == levelDetail, m.diff.View())
 	right := lipgloss.JoinVertical(lipgloss.Left, sess, diff)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.statusLine(), m.footer())
+}
+
+func (m Model) workPaneView() string {
+	return m.workPaneTitle() + "\n" + m.sessions.View()
+}
+
+func (m Model) workPaneTitle() string {
+	p := m.selectedProject()
+	runsCount, reviewCount := 0, 0
+	if p != nil {
+		for _, r := range m.runsByProject[p.Path] {
+			runsCount++
+			if r.Status == runs.StatusReview {
+				reviewCount++
+			}
+		}
+	}
+	active := "runs"
+	if m.worktreeView {
+		active = "worktrees"
+	} else if !m.showingRuns() {
+		active = "sessions"
+	}
+	return dim.Render(fmt.Sprintf(" %s · runs %d (%d review) · sessions %d · worktrees %d ",
+		strings.ToUpper(active), runsCount, reviewCount, len(m.sessionList), len(m.worktreeList)))
 }
 
 // pane wraps content in a rounded border, brighter when focused.
@@ -122,10 +148,20 @@ func (m Model) statusLine() string {
 		return dim.Render(truncate(fmt.Sprintf("kanban · %s · p to toggle scope", scope), m.width))
 	default:
 		agents := 0
+		activeRuns := 0
+		reviewRuns := 0
 		for _, p := range m.projects {
 			agents += p.LiveAgents
+			for _, r := range m.runsByProject[p.Path] {
+				if r.Status == runs.StatusRunning {
+					activeRuns++
+				}
+				if r.Status == runs.StatusReview {
+					reviewRuns++
+				}
+			}
 		}
-		line := fmt.Sprintf("%d projects · %d live agents", len(m.projects), agents)
+		line := fmt.Sprintf("%d projects · %d active runs · %d review · %d live agents", len(m.projects), activeRuns, reviewRuns, agents)
 		if !m.curated {
 			line += " · A to curate"
 		}
@@ -135,7 +171,7 @@ func (m Model) statusLine() string {
 
 // footer renders the keybind hints for the current mode.
 func (m Model) footer() string {
-	keys := "↑↓ nav · enter drill · esc back · u runs · d diff · w worktrees · t tasks · h history · a attach · r handoff · n launch · A add · X untrack · C create · k kill · g gc · / filter · R · q"
+	keys := "↑↓ nav · enter drill · esc back · u runs · d diff · o report · w worktrees · t tasks · h history · a attach · r handoff · n launch · A add · X untrack · C create · k kill · g gc · / filter · R · q"
 	switch {
 	case m.confirm != nil:
 		keys = "y confirm · n cancel"
@@ -243,6 +279,9 @@ func runDetail(r runs.Run) string {
 		b.WriteString("\n\n" + dim.Render("report") + "\n" + r.Report)
 	} else {
 		b.WriteString("\n\n" + dim.Render("report") + "\nreport.md not written yet")
+	}
+	if len(r.Artifacts) > 0 {
+		b.WriteString("\n\n" + artifactsBlock(r.Artifacts))
 	}
 	return b.String()
 }

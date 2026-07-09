@@ -93,7 +93,11 @@ func collectFleet(cfg config.Config) tea.Cmd {
 		for _, p := range projects {
 			taskList = append(taskList, tasks.LoadLocal(ctx, p.Path)...)
 			if projectRuns, err := store.LoadProject(p.Path); err == nil {
-				runMap[p.Path] = projectRuns
+				base := cfg.BaseBranch(p.Name)
+				if len(p.Worktrees) > 0 && p.Worktrees[0].BaseBranch != "" {
+					base = p.Worktrees[0].BaseBranch
+				}
+				runMap[p.Path] = collect.EnrichRuns(ctx, collect.Git{}, projectRuns, base)
 			}
 		}
 		tasks.LinkTasks(projects, taskList)
@@ -480,6 +484,23 @@ func enterDiff(wt model.Worktree, cfg config.Config) tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return errMsg{fmt.Errorf("diff viewer: %w", err)}
+		}
+		return execDoneMsg{}
+	})
+}
+
+func enterReport(path string) tea.Cmd {
+	if path == "" {
+		return func() tea.Msg { return errMsg{errors.New("run has no report path")} }
+	}
+	viewer := "less"
+	if _, err := exec.LookPath(viewer); err != nil {
+		viewer = "cat"
+	}
+	cmd := exec.Command(viewer, path)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return errMsg{fmt.Errorf("report viewer: %w", err)}
 		}
 		return execDoneMsg{}
 	})

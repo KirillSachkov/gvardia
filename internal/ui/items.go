@@ -80,8 +80,8 @@ func sessionRow(s model.Session) table.Row {
 }
 
 func runColumns(width int) []table.Column {
-	const state, runner, task, tmux, last = 8, 10, 24, 18, 5
-	branch := width - (state + runner + task + tmux + last)
+	const state, runner, task, delta, tmux, last = 8, 10, 24, 9, 18, 5
+	branch := width - (state + runner + task + delta + tmux + last)
 	if branch < 8 {
 		branch = 8
 	}
@@ -90,6 +90,7 @@ func runColumns(width int) []table.Column {
 		{Title: "runner", Width: runner},
 		{Title: "task", Width: task},
 		{Title: "branch", Width: branch},
+		{Title: "Δ", Width: delta},
 		{Title: "tmux", Width: tmux},
 		{Title: "last", Width: last},
 	}
@@ -108,7 +109,11 @@ func runRow(r runs.Run) table.Row {
 	if tmux == "" {
 		tmux = "—"
 	}
-	return table.Row{runStatusLabel(r.Status), r.Runner, task, branch, tmux, relativeTime(r.UpdatedAt)}
+	delta := ""
+	if r.ChangeStat.Files > 0 {
+		delta = fmt.Sprintf("+%d/-%d", r.ChangeStat.Added, r.ChangeStat.Removed)
+	}
+	return table.Row{runStatusLabel(r.Status), r.Runner, task, branch, delta, tmux, relativeTime(r.UpdatedAt)}
 }
 
 func runStatusLabel(status runs.Status) string {

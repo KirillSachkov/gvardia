@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/KirillSachkov/gvardia/internal/model"
 )
 
 // Status is a run lifecycle state.
@@ -26,23 +28,25 @@ const (
 
 // Run is one local agent execution tracked by gvardia.
 type Run struct {
-	ID           string    `json:"id"`
-	Project      string    `json:"project"`
-	ProjectPath  string    `json:"projectPath"`
-	TaskID       string    `json:"taskId,omitempty"`
-	TaskTitle    string    `json:"taskTitle,omitempty"`
-	Runner       string    `json:"runner"`
-	Tool         string    `json:"tool"`
-	Status       Status    `json:"status"`
-	TmuxTarget   string    `json:"tmuxTarget,omitempty"`
-	WorktreePath string    `json:"worktreePath,omitempty"`
-	Branch       string    `json:"branch,omitempty"`
-	PromptPath   string    `json:"promptPath"`
-	MetaPath     string    `json:"metaPath"`
-	ReportPath   string    `json:"reportPath"`
-	Report       string    `json:"-"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           string           `json:"id"`
+	Project      string           `json:"project"`
+	ProjectPath  string           `json:"projectPath"`
+	TaskID       string           `json:"taskId,omitempty"`
+	TaskTitle    string           `json:"taskTitle,omitempty"`
+	Runner       string           `json:"runner"`
+	Tool         string           `json:"tool"`
+	Status       Status           `json:"status"`
+	TmuxTarget   string           `json:"tmuxTarget,omitempty"`
+	WorktreePath string           `json:"worktreePath,omitempty"`
+	Branch       string           `json:"branch,omitempty"`
+	PromptPath   string           `json:"promptPath"`
+	MetaPath     string           `json:"metaPath"`
+	ReportPath   string           `json:"reportPath"`
+	Report       string           `json:"-"`
+	ChangeStat   model.ChangeStat `json:"-"`
+	Artifacts    []model.Artifact `json:"-"`
+	CreatedAt    time.Time        `json:"createdAt"`
+	UpdatedAt    time.Time        `json:"updatedAt"`
 }
 
 // CreateInput is the caller-supplied data for creating a run.
