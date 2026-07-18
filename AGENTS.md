@@ -1,15 +1,16 @@
 # AGENTS.md — context for coding-agent sessions
 
-This repo is **spec-first**: the design and plan are complete; the tool is not yet
-built. If you are an agent (Claude Code, Codex, …) dispatched to work here, read
-in this order:
+Status 2026-07-18: the tool IS built (branch `v4`, released binaries in `dist/`,
+`cmd/` + `internal/` implemented); the wider product direction is parked (see
+sachkov-os `wiki/gvardia-agent-work-observability.md`). If you are an agent
+(Claude Code, Codex, …) dispatched to work here, read in this order:
 
-1. `docs/DESIGN.md` — architecture, scope, tech choice. Source of truth.
+1. `docs/DESIGN-v4-hub.md` — current architecture (older `DESIGN*.md` are history).
 2. `docs/GO-CONVENTIONS.md` — how to write Go + Bubble Tea here. **Read before
    writing code** — it exists to prevent "C#-in-Go".
-3. `docs/PLAN.md` — implement **phase by phase, in order**; each phase's
-   *Acceptance* is a gate. Commit after each phase.
-4. `docs/ROADMAP.md` — do **not** build these yet; they are post-v1.
+3. `docs/PLAN-v4-hub.md` + `docs/HANDOFF-v4.md` — current plan state; older
+   `PLAN*.md` are superseded.
+4. `docs/ROADMAP.md` — do **not** build these; direction is parked anyway.
 
 ## What gvardia is
 
@@ -20,7 +21,7 @@ it aggregates state and shells out to `lazygit`/`delta`/`tmux`/agent CLIs. It is
 
 ## Stack & conventions
 
-- **Go 1.23+**, module `github.com/<you>/gvardia`. TUI: Bubble Tea v2 + Lipgloss +
+- **Go 1.25** (see `go.mod`), module `github.com/<you>/gvardia`. TUI: Bubble Tea v2 + Lipgloss +
   Bubbles. TOML config.
 - Layout: `cmd/gvardia`, `internal/{config,model,collect,adapters,ui}`,
   `tools/wt-prune`, `docs/`.
